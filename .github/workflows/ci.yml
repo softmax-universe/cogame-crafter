@@ -1,4 +1,4 @@
-# CI for a Coworld game repo (Metta-AI/cogame-crafter).
+# CI for a Coworld game repo (softmax-universe/cogame-crafter).
 #
 # Goes to:  .github/workflows/ci.yml  in the coworld repo.
 # Substitute: crafter  (lowercase game slug, e.g. bullwhip)
@@ -174,7 +174,7 @@ jobs:
         # commit, not silently at the next push.
         uses: actions/checkout@v5
         with:
-          repository: Metta-AI/coworld-ctf
+          repository: softmax-universe/coworld-ctf
           ref: a7484eb47b14bde20678ff106c684a633b4f294c
           path: .starter
 

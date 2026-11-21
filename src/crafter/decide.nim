@@ -115,6 +115,10 @@ proc resultRecord*(sim: SimServer): string =
 #  The turn
 # ---------------------------------------------------------------------------
 
+proc holdFallbackDirective*(): Directive =
+  ## Empty no-op plan for scored LLM failures (never runs `foragerPlan`).
+  Directive(actions: @[], source: dsFallback)
+
 proc foragerFallback*(sim: SimServer): Directive =
   ## THE fallback plan, computed server-side by the SAME proc the `forager`
   ## baseline uses. `tests/test_crafter_driver.nim` asserts the two resolve
@@ -174,10 +178,10 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
     ## An LLM seat that CANNOT call the LLM this turn is a FALLBACK, not a
     ## scripted policy, and the design's `fallback.cause` enum names every
     ## reason it happens. Recording it is what makes the two countable.
-    result.directive = foragerFallback(sim)
+    result.directive = holdFallbackDirective()
     result.records.add(fallbackRecord(turnIndex, 1, blockedCause,
-      "the LLM is unavailable for this turn; playing forager"))
-    echo "crafter llm: seat ", seat, " falling back to forager (", blockedCause,
+      "the LLM is unavailable for this turn; executing empty hold plan"))
+    echo "crafter llm: seat ", seat, " falling back to empty hold (", blockedCause,
       ") on turn ", turnIndex
     return
 
@@ -278,7 +282,7 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
       break
 
   if open:
-    result.directive = foragerFallback(sim)
+    result.directive = holdFallbackDirective()
     let cause =
       if engine.client.disabled or engine.client.transport == ltNone:
         "no_credentials"
@@ -286,9 +290,9 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
       elif engine.client.throttled: "throttled"
       else: "parse_error"
     result.records.add(fallbackRecord(turnIndex, 2, cause,
-      "seat fell back to the forager plan"))
+      "seat fell back to empty hold plan"))
     ## "falling back" is the phrase phase 60 greps the GAME log for.
-    echo "crafter llm: seat ", seat, " falling back to forager (", cause,
+    echo "crafter llm: seat ", seat, " falling back to empty hold (", cause,
       ") on turn ", turnIndex
 
 proc applyDirective*(sim: var SimServer, directive: Directive,

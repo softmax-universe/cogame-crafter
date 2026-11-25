@@ -100,6 +100,10 @@ One image, two entrypoints, and the whole policy set switched by environment:
 ```bash
 coworld upload-policy coworld-crafter:latest --name my-crafter \
   --run /bin/crafter-player --secret-env PLAYER_PROMPT="<your strategy>"
+
+# Separate scripted baseline upload (not bundled in the solo release manifest):
+coworld upload-policy coworld-crafter:latest --name crafter-forager \
+  --run /bin/crafter-player --env PLAYER_SCRIPTED=forager --env PLAYER_POLICY_LABEL=forager
 ```
 
 | Env | Effect |

@@ -23,7 +23,10 @@
         "/bin/crafter"
       ],
       "source_url": "https://github.com/Metta-AI/cogame-crafter/tree/main",
-      "env": {}
+      "env": {
+        "COWORLD_LLM_ENABLED": "true",
+        "COWORLD_LLM_MODEL": "anthropic/claude-haiku-4.5"
+      }
     },
     "protocols": {
       "player": {
@@ -646,32 +649,10 @@
       ],
       "source_url": "https://github.com/Metta-AI/cogame-crafter",
       "env": {
+        "COWORLD_LLM_ENABLED": "true",
+        "COWORLD_LLM_MODEL": "anthropic/claude-haiku-4.5",
         "PLAYER_PROMPT": "Climb the achievement tree in dependency order while keeping health, food, drink, and energy safe. Collect wood, place a table, craft tools, mine stone, coal, iron, and diamond, and shelter before sleeping at night.",
         "PLAYER_POLICY_LABEL": "llm"
-      },
-      "resources": {
-        "requests": {
-          "cpu": "100m",
-          "memory": "64Mi"
-        },
-        "limits": {
-          "cpu": "1"
-        }
-      }
-    },
-    {
-      "id": "forager",
-      "type": "player",
-      "name": "forager",
-      "description": "The published scripted baseline: a deterministic priority ladder that drinks, eats, shelters at night and climbs the tech tree.",
-      "image": "{{CRAFTER_IMAGE}}",
-      "run": [
-        "/bin/crafter-player"
-      ],
-      "source_url": "https://github.com/Metta-AI/cogame-crafter",
-      "env": {
-        "PLAYER_SCRIPTED": "forager",
-        "PLAYER_POLICY_LABEL": "forager"
       },
       "resources": {
         "requests": {
@@ -775,7 +756,7 @@
   "certification": {
     "players": [
       {
-        "player_id": "forager"
+        "player_id": "llm"
       }
     ],
     "game_config": {

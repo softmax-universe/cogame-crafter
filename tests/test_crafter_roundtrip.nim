@@ -8,7 +8,7 @@
 ##   3. Provider/infra failure (HTTP 500) fails cleanly: non-zero server exit,
 ##      NO results.json, NO player_failure.json (not blamed on the player),
 ##      unscored failed trajectory with provider_error stopDetail.
-##   4. Scripted certification baseline (forager) completes offline with no
+##   4. Explicit offline scripted baseline (forager) completes offline with no
 ##      credentials and writes authoritative results.json.
 
 import std/[json, net, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
@@ -125,13 +125,13 @@ suite "public host+player round-trip":
 
   let m = manifest()
   let llmEntry = m["player"][0]
-  let foragerEntry = m["player"][1]
   var llmEnv: seq[(string, string)]
   for k, v in llmEntry["env"]:
     llmEnv.add((k, v.getStr()))
-  var foragerEnv: seq[(string, string)]
-  for k, v in foragerEntry["env"]:
-    foragerEnv.add((k, v.getStr()))
+  let foragerEnv = @[
+    ("PLAYER_SCRIPTED", "forager"),
+    ("PLAYER_POLICY_LABEL", "forager")
+  ]
 
   test "native LLM player completes regular JSON + markdown fence round-trip":
     let dir = tmp / "complete"
@@ -194,7 +194,7 @@ suite "public host+player round-trip":
     check "provider_error" in terminal["outcome"]["stopDetail"].getStr()
     check terminal["participant_outcomes"] == newJObject()
 
-  test "scripted forager baseline completes offline certification round-trip":
+  test "explicit scripted forager baseline completes offline round-trip":
     let dir = tmp / "forager"
     let codes = runRoundTrip(serverBin, playerBin, dir, "forager", foragerEnv, "")
     check codes.serverCode == 0

@@ -1,8 +1,8 @@
 ## Bounded orders and legality on the scripted baselines, the driver and the
 ## reply validator — design note §Tests items 19..25.
 
-import std/[json, random, sets, unicode, unittest]
-import crafter/[sim, driver, directives, baselines, decide]
+import std/[json, random, sets, strutils, unicode, unittest]
+import crafter/[sim, driver, directives, baselines, decide, llm, prompts]
 import helpers
 
 const Verbs = block:
@@ -199,9 +199,14 @@ suite "reply validation":
     let plainFence = extractJsonObject(
       "```\n{\"actions\":[{\"act\":\"sleep\",\"n\":2}]}\n```")
     check plainFence["actions"].len == 1
+    check extractJsonObject("Looking at the map:\n```json\n{\"actions\":[]}\n```")["actions"].len == 0
+    let bomBare = extractJsonObject(
+      "\xEF\xBB\xBF{\"actions\":[{\"act\":\"noop\"}]}")
+    check bomBare["actions"].len == 1
     for bad in [
       "no braces at all",
       "[]",
+      "I'll chop wood first.\n{\"actions\":[{\"act\":\"do\"}]}",
       "here you go:\n```json\n{\"actions\":[]}\n```\nok",
       "Sure! {\"actions\":[]}",
       "{\"actions\":[]} thanks",
@@ -213,6 +218,21 @@ suite "reply validation":
     ]:
       expect DirectiveError:
         discard extractJsonObject(bad)
+    try:
+      discard extractJsonObject("Looking at the map\n" & "\u{1F9E9}".repeat(100))
+      fail()
+    except DirectiveError as error:
+      check "invalid JSON reply:" in error.msg
+      check "(got: Looking at the map" in error.msg
+      check error.msg.validateUtf8() == -1
+
+  test "systemPrompt enumerates all canonical verbs and explains the final action":
+    for variant in PromptVariant:
+      if variant == pvMixed: continue
+      let text = systemPrompt(PromptSelection(variant: variant))
+      for verb in Verbs:
+        check verb in text
+      check "finish with it in a JSON code block" in text
 
   test "strict parseDirective rejects shims, aliases, out-of-range fields, and over-cap lists":
     for bad in [

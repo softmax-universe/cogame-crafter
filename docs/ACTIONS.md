@@ -1,10 +1,6 @@
 # Actions and the reply format
 
-Reply with **one JSON object and nothing else**, either bare JSON or inside a
-single ordinary outer Markdown code fence (` ```json ` or ` ``` `). Surrounding
-prose, multiple objects, non-object JSON, legacy field aliases, and invalid
-actions are **rejected** (retried once, then surfaced as a player failure — no
-silent substitution or fallback moves).
+Give one JSON action object. You can send it directly or close your response with a fenced JSON block after explaining your plan.
 
 ```json
 {"actions": [{"act": "goto", "x": 35, "y": 25},
@@ -16,7 +12,7 @@ silent substitution or fallback moves).
 
 | Field | Type | Cap / domain |
 |---|---|---|
-| `actions` | array | **required**, ordered action objects. Empty array `[]` = 24 `noop` ticks. Missing, non-array, non-object entries, or > 12 entries are rejected |
+| `actions` | array | **required**, ordered action objects. Empty array `[]` = 24 `noop` ticks. Missing, non-array, or non-object entries are rejected; expanded primitives are bounded by `turnTicks` (24) |
 | `actions[].act` | string | **required**; exact canonical name of one of the **17 primitives** or **2 macros** (`goto`, `move`) |
 | `actions[].x`, `.y` | integer | required iff `act == "goto"`; integer in `0..63`; non-integer, absent, or out-of-bounds values are rejected |
 | `actions[].dir` | string | required iff `act == "move"`; exact canonical direction `up | down | left | right`; anything else is rejected |

@@ -68,7 +68,6 @@ def play(variant, seed, wording="canonical", prompt_seed=0, repair=False):
                 if not trace:
                     for bad_response in (
                         json.dumps({**proposal, "actions": [{"act": "unknown-command"}]}),
-                        f"Sure:\n```json\n{json.dumps(proposal)}\n```",
                         json.dumps(proposal) + " " + json.dumps(proposal),
                         json.dumps({**proposal, "actions": [{"do": "noop"}]}),
                         json.dumps({**proposal, "actions": [{"act": "move", "dir": "N"}]}),
@@ -86,7 +85,7 @@ def play(variant, seed, wording="canonical", prompt_seed=0, repair=False):
                 if trace:
                     assert view["notes"] == "森" * 400
                 wire = (
-                    f"```json\n{json.dumps(proposal)}\n```"
+                    f"Here is my action:\n```json\n{json.dumps(proposal)}\n```"
                     if len(trace) % 2 == 0
                     else json.dumps(proposal)
                 )

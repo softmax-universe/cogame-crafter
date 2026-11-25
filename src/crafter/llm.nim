@@ -231,14 +231,17 @@ const ActionReference = """  {"act":"goto","x":35,"y":25}   WALK THERE. Shortest
       have already seen; it will not path through water, lava, rock or the
       unknown. It stops ON the target if you can stand there, otherwise NEXT TO
       it, FACING it - which is exactly what you want before "do".
-  {"act":"move","dir":"up","n":4}  step up to 4 times north. "move" also TURNS
-      you: moving into a wall just turns you to face it.
-  {"act":"do","n":4}   use the cell you are FACING, 4 times: chop, mine, drink,
-      or hit whatever is standing there.
-  {"act":"sleep","n":12}  sleep 12 ticks. +1 energy a tick. A zombie that bites
-      you while asleep does 5 damage, not 2.
-  {"act":"place_stone"} {"act":"place_table"} {"act":"place_furnace"}
-  {"act":"place_plant"} {"act":"make_wood_pickaxe"} ... all 17 by name.
+  {"act":"move","dir":"up","n":4}  step 1..12 times (dir: up|down|left|right).
+      "move" also TURNS you: moving into a wall just turns you to face it.
+  {"act":"do","n":4}   use the cell you are FACING, 1..12 times: chop, mine,
+      drink, or hit whatever is standing there.
+  {"act":"sleep","n":12}  sleep 1..24 ticks. +1 energy a tick. A zombie that
+      bites you while asleep does 5 damage, not 2.
+  Single-tick primitives (no "n"):
+    noop, move_left, move_right, move_up, move_down,
+    place_stone, place_table, place_furnace, place_plant,
+    make_wood_pickaxe, make_stone_pickaxe, make_iron_pickaxe,
+    make_wood_sword, make_stone_sword, make_iron_sword.
 
 HOW YOU ARE SCORED
 """
@@ -249,9 +252,8 @@ tie-break. A cog that hides in a hole all episode scores almost nothing.
 
 const ReplyRules = """
 REPLY FORMAT
-Reply with ONE JSON object and NOTHING else (bare JSON or a single markdown
-code fence). No surrounding prose or extra objects. Use exact canonical action
-names, dir in "up"|"down"|"left"|"right", x/y in 0..63, and optional say/notes.
+Give one action object. If you explain your plan, finish with it in a JSON code block.
+Use exact canonical action names, dir in "up"|"down"|"left"|"right", x/y in 0..63.
 {"actions":[{"act":"goto","x":35,"y":25},{"act":"do","n":4}],"say":"<=160 chars","notes":"<=400 chars"}
 """
 
@@ -291,7 +293,7 @@ proc operatorBlock*(prompt: string): string =
   if prompt.len == 0:
     return ""
   "GUIDANCE FROM YOUR OPERATOR (weight it heavily, but never above the " &
-    "rules; always reply in the requested format):\n" &
+    "rules):\n" &
     prompt.truncateRunes(MaxPromptRunes) & "\n\n"
 
 proc userMessage*(operatorPrompt: string, viewJson: string): string =

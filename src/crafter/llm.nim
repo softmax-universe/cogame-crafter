@@ -2,22 +2,13 @@
 ## server composes the seat's partially observed view plus that seat's
 ## PLAYER_PROMPT and asks Claude what the cog does for the next twelve ticks.
 ##
-## Forked from `coworld-ctf/src/ctf/llm.nim` behaviour for behaviour — the
-## credential ladder, the Bedrock model rotation, the fence-tolerant JSON
-## extraction and the rune-boundary truncation are all that file's, because
-## they are all scar tissue from real hosted failures.
-##
-## Crafter is a SINGLE-SEAT game, so the starter's one-parallel-batch-per-turn
-## machinery (`curly.makeRequests`) carries a batch of ONE and is otherwise
-## untouched. At most one request is ever in flight.
-##
 ## Credentials, in order of preference:
 ##   COWORLD_LLM_ENDPOINT (hosted), or local Bedrock bearer token
 ##   ANTHROPIC_API_KEY
 ##   ANTHROPIC_API_KEY_URI
-## With none of them the client disables itself and every turn falls back to
-## the scripted layer INSTANTLY, with no network wait — which is what lets
-## offline certification finish in seconds.
+## With none of them the client disables itself immediately with no network
+## wait: scripted certification seats run locally, while LLM seats fail cleanly
+## without substituting a scripted move.
 
 import
   std/[json, os, strutils],
@@ -32,6 +23,7 @@ const
     ## against a provider that echoes it.
   AnthropicVersion = "2023-06-01"
   BedrockAnthropicVersion = "bedrock-2023-05-31"
+  DefaultBedrockModel* = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 type
   LlmTransport* = enum
@@ -43,18 +35,15 @@ type
     apiKey: string
     sidecarEndpoint: string
     bedrockEndpoint: string
-    bedrockModels: seq[string]
-    bedrockModel: int
+    bedrockModel: string
     bedrockToken: string
     model*: string
     maxOutputTokens*: int
     disabled*: bool
     throttled*: bool
-      ## The provider answered 429 and there is no other candidate model to
-      ## rotate to. Set per turn, cleared by the turn loop: retrying inside
-      ## the same turn cannot succeed, so the seat fails fast to the scripted
-      ## fallback instead of spending the turn budget on a call that will be
-      ## refused again.
+      ## The provider answered 429 on this turn. Set per turn, cleared by the
+      ## turn loop: retrying inside the same turn cannot succeed, so the turn
+      ## stops immediately without swapping models.
 
   LlmError* = object of ValueError
 
@@ -71,29 +60,16 @@ proc resolveApiKey(): string =
     echo "crafter llm: failed to fetch ANTHROPIC_API_KEY_URI: ", error.msg
     result = ""
 
-proc bedrockModelIds(): seq[string] =
-  ## Bedrock inference-profile candidates, tried in order; BEDROCK_MODEL pins
-  ## one. `us.anthropic.claude-sonnet-4-6` is DELIBERATELY NOT A CANDIDATE:
-  ## it times out on every sidecar call (cogame-raid round 2, 2026-08-23).
+proc bedrockModelId*(): string =
+  ## Single Bedrock inference-profile model ID; BEDROCK_MODEL overrides the
+  ## default. Never silently rotates to an alternate model.
   let pinned = getEnv("BEDROCK_MODEL").strip()
   if pinned.len > 0:
-    return @[pinned]
-  @["us.anthropic.claude-haiku-4-5-20251001-v1:0",
-    "us.anthropic.claude-sonnet-4-5-20250929-v1:0"]
-
-proc tryNextBedrockModel(client: LlmClient, why: string): bool =
-  if client.transport != ltBedrock or
-      client.bedrockModel + 1 >= client.bedrockModels.len:
-    return false
-  client.bedrockModel.inc
-  echo "crafter llm: ", client.bedrockModels[client.bedrockModel - 1],
-    " unusable (", why, "); falling back to ",
-    client.bedrockModels[client.bedrockModel]
-  true
+    return pinned
+  DefaultBedrockModel
 
 proc bedrockUrl(client: LlmClient): string =
-  client.bedrockEndpoint & "/model/" &
-    client.bedrockModels[client.bedrockModel] & "/invoke"
+  client.bedrockEndpoint & "/model/" & client.bedrockModel & "/invoke"
 
 proc newLlmClient*(config: GameConfig): LlmClient =
   result = LlmClient(
@@ -118,11 +94,11 @@ proc newLlmClient*(config: GameConfig): LlmClient =
       else: "https://bedrock-runtime." & region & ".amazonaws.com"
     result.transport = ltBedrock
     result.bedrockEndpoint = endpoint.strip(chars = {'/'}, leading = false)
-    result.bedrockModels = bedrockModelIds()
+    result.bedrockModel = bedrockModelId()
+    result.model = result.bedrockModel
     result.bedrockToken = bedrockToken
     result.curl = newCurly()
-    echo "crafter llm: bedrock transport, model ",
-      result.bedrockModels[result.bedrockModel]
+    echo "crafter llm: bedrock transport, model ", result.bedrockModel
     return
   result.apiKey = resolveApiKey()
   if result.apiKey.len > 0:
@@ -132,10 +108,7 @@ proc newLlmClient*(config: GameConfig): LlmClient =
   else:
     result.transport = ltNone
     result.disabled = true
-    ## The exact phrase phase 60 greps the GAME log for, alongside "falling
-    ## back" in decide.nim: "LLM provider is unavailable".
-    echo "crafter llm: no credentials — the LLM provider is unavailable; ",
-      "every turn is falling back to the scripted layer"
+    echo "crafter llm: no credentials — the LLM provider is unavailable"
 
 proc requestFor*(
   client: LlmClient, system, user: string, slot: int
@@ -182,9 +155,8 @@ proc textOf*(
   client: LlmClient, response: Response, error, url: string
 ): string =
   ## The text of one batched reply, or an LlmError describing why there is
-  ## none. Auth failure disables the client for the rest of the episode;
-  ## model-access denial and throttling rotate the Bedrock model for the next
-  ## batch instead.
+  ## none. Auth/access failures disable the client for the rest of the episode;
+  ## 429 throttling marks `client.throttled` without rotating models.
   if error.len > 0:
     raise newException(LlmError, "llm transport: " & error)
   if response.code == 401 or response.code == 403:
@@ -193,17 +165,13 @@ proc textOf*(
     ## half, and truncateRunes downstream only SHORTENS — it cannot repair a
     ## broken one.
     let detail = response.body.truncateRunes(MaxFallbackDetailRunes)
-    if "Model access is denied" in response.body and
-        client.tryNextBedrockModel("no model access"):
-      raise newException(LlmError, "bedrock model access denied: " & detail)
     client.disabled = true
     raise newException(
       LlmError, "llm auth failed (" & $response.code & ") at " & url & ": " &
       detail)
   if response.code == 429:
     let detail = response.body.truncateRunes(MaxFallbackDetailRunes)
-    if not client.tryNextBedrockModel("throttled"):
-      client.throttled = true
+    client.throttled = true
     raise newException(LlmError, "llm throttled (429): " & detail)
   if response.code < 200 or response.code >= 300:
     raise newException(LlmError, "anthropic error " & $response.code & ": " &

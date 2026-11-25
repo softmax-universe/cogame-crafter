@@ -290,8 +290,7 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
       engine.nativeAttempts.add(evidence)
     inc attempt
     if engine.client.throttled and open:
-      echo "crafter llm: provider throttled with no other candidate on turn ",
-        turnIndex
+      echo "crafter llm: provider throttled on turn ", turnIndex
       break
 
   if open:

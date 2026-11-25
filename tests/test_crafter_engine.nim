@@ -1,7 +1,8 @@
 ## End-to-end episode writing a replay — design note §Tests items 26..30, and
 ## the six results identities of §Server.
 
-import std/[json, sets, strutils, unittest]
+import std/[json, os, sets, strutils, unittest]
+import curly
 import crafter/[sim, driver, directives, baselines, decide, events, prompts, llm]
 import helpers
 
@@ -200,6 +201,51 @@ suite "an episode end to end":
     sim.applyStop(edFault, decision.failureCause)
     check sim.endReason == erFault
     check sim.endRule == edFault
+
+  test "bedrock client uses a single model without silent rotation on 403/429":
+    let savedSidecar = getEnv("COWORLD_LLM_ENDPOINT")
+    let savedEndpoint = getEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME")
+    let savedToken = getEnv("AWS_BEARER_TOKEN_BEDROCK")
+    let savedModel = getEnv("BEDROCK_MODEL")
+    defer:
+      if savedSidecar.len > 0: putEnv("COWORLD_LLM_ENDPOINT", savedSidecar)
+      else: delEnv("COWORLD_LLM_ENDPOINT")
+      if savedEndpoint.len > 0: putEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", savedEndpoint)
+      else: delEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME")
+      if savedToken.len > 0: putEnv("AWS_BEARER_TOKEN_BEDROCK", savedToken)
+      else: delEnv("AWS_BEARER_TOKEN_BEDROCK")
+      if savedModel.len > 0: putEnv("BEDROCK_MODEL", savedModel)
+      else: delEnv("BEDROCK_MODEL")
+
+    delEnv("COWORLD_LLM_ENDPOINT")
+    putEnv("AWS_ENDPOINT_URL_BEDROCK_RUNTIME", "http://127.0.0.1:19999")
+    putEnv("AWS_BEARER_TOKEN_BEDROCK", "test-token")
+    delEnv("BEDROCK_MODEL")
+
+    let client = newLlmClient(testConfig())
+    check client.transport == ltBedrock
+    check client.model == DefaultBedrockModel
+    let initialUrl = client.requestFor("sys", "usr", 0).url
+    check initialUrl == "http://127.0.0.1:19999/model/" & DefaultBedrockModel & "/invoke"
+
+    expect(LlmError):
+      discard client.textOf(
+        Response(code: 429, body: "ThrottlingException"), "", initialUrl)
+    check client.throttled
+    check not client.disabled
+    check client.requestFor("sys", "usr", 0).url == initialUrl
+
+    expect(LlmError):
+      discard client.textOf(
+        Response(code: 403, body: "Model access is denied"), "", initialUrl)
+    check client.disabled
+    check client.requestFor("sys", "usr", 0).url == initialUrl
+
+    putEnv("BEDROCK_MODEL", "custom.bedrock.model-v1:0")
+    let pinnedClient = newLlmClient(testConfig())
+    check pinnedClient.model == "custom.bedrock.model-v1:0"
+    check pinnedClient.requestFor("sys", "usr", 0).url ==
+      "http://127.0.0.1:19999/model/custom.bedrock.model-v1:0/invoke"
 
   test "player defects are distinguished from infrastructure failures":
     check isPlayerDefect("parse_error")

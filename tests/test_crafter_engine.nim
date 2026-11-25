@@ -196,9 +196,17 @@ suite "an episode end to end":
     check named
     check not decision.ok
     check decision.failureCause in ["no_credentials", "budget_guard"]
-    sim.applyStop(edWallClock, "budget_guard")
-    check sim.endReason == erDeadline
-    check sim.endRule == edWallClock
+    check not isPlayerDefect(decision.failureCause)
+    sim.applyStop(edFault, decision.failureCause)
+    check sim.endReason == erFault
+    check sim.endRule == edFault
+
+  test "player defects are distinguished from infrastructure failures":
+    check isPlayerDefect("parse_error")
+    for infra in ["no_credentials", "auth_error", "provider_error",
+                  "transport_error", "timeout", "throttled",
+                  "rate_guard", "budget_guard"]:
+      check not isPlayerDefect(infra)
 
   test "the rate guard skips the call and names the cause":
     var sim = startedSim(testConfig())

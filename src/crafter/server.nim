@@ -555,12 +555,10 @@ proc runServerLoop*() =
           engine.trajectory.recordRejectedDecision(turnIndex,
             privateObservation, selection, engine.seats[0].prompt,
             engine.nativeAttempts)
-          if decision.failureCause == "budget_guard":
-            sim.applyStop(edWallClock, detail)
-          else:
+          if isPlayerDefect(decision.failureCause):
             sim.deadSeats[0] = true
             declarePlayerFailure(0, detail)
-            sim.applyStop(edFault, detail)
+          sim.applyStop(edFault, detail)
           break
         let record = sim.applyDirective(decision.directive, observation)
         engine.trajectory.recordAppliedDecision(turnIndex, privateObservation,
@@ -612,9 +610,9 @@ proc runServerLoop*() =
   sim.step()
   recordHash()
 
-  let results = sim.runResultsJson()
   engine.trajectory.finishNativeTrajectory(sim)
-  writeChat(resultRecord(sim))
+  if sim.endReason != erFault:
+    writeChat(resultRecord(sim))
 
   try:
     if replayWriter.enabled:
@@ -622,12 +620,14 @@ proc runServerLoop*() =
   except CatchableError:
     discard
 
-  try:
-    let uri = getEnv("COGAME_RESULTS_URI")
-    if uri.len > 0:
-      writeCogameUri(uri, results, "application/json", "COGAME_RESULTS_URI")
-  except CatchableError as error:
-    echo "crafter: failed to write results: ", error.msg
+  if sim.endReason != erFault:
+    try:
+      let uri = getEnv("COGAME_RESULTS_URI")
+      if uri.len > 0:
+        let results = sim.runResultsJson()
+        writeCogameUri(uri, results, "application/json", "COGAME_RESULTS_URI")
+    except CatchableError as error:
+      echo "crafter: failed to write results: ", error.msg
   try:
     let uri = getEnv("COGAME_SAVE_REPLAY_URI")
     if uri.len > 0 and fileExists(replayPath):
@@ -643,6 +643,11 @@ proc runServerLoop*() =
         "COGAME_EVENTS_URI")
   except CatchableError as error:
     echo "crafter: failed to write events: ", error.msg
+
+  if sim.endReason == erFault:
+    echo "crafter: episode failed — reason ", sim.endReason, " endRule ",
+      sim.endRule, " detail ", sim.stopDetail
+    quit(1)
 
   echo "crafter: episode complete — reason ", sim.endReason, " endRule ",
     sim.endRule, " unlocked ", sim.achievementsUnlocked(), "/",

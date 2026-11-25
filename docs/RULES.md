@@ -79,10 +79,11 @@ times — which is exactly why `wake_up`, `eat_cow`, `eat_plant` and
 
 Per **command turn**: the observation is built, one LLM request is issued
 (attempt-1 deadline 6 s), retried **once** (3 s), and on a second failure the
-**`forager`** scripted plan is computed server-side and a `fallback` record is
-written. The reply's actions are validated (invalid entries are **dropped**,
-never rewritten), the macros are expanded against the known map **as of turn
-start**, and the queue is truncated to 24 primitives. Nothing carries over.
+episode terminates unscored with `fault` rather than substituting a scripted
+move (model parse/action defects also emit `COGAME_PLAYER_FAILURE_URI`). The
+reply's actions are strictly validated (never rewritten or silently repaired),
+the macros are expanded against the known map **as of turn start**, and the
+queue is truncated to 24 primitives. Nothing carries over.
 
 Then, for each of the next `turnTicks` ticks:
 
@@ -122,10 +123,10 @@ The episode ends at the first of **death**, **all twenty-two unlocked**, the
 - **`complete`** — death, allUnlocked, turnCap or tickCap. **A death is
   `complete`, not a failure**: dying of a zombie bite on night four having
   unlocked twelve achievements is the game working.
-- **`deadline`** — the wall-clock stop fired. Everything unlocked so far still
-  scores; the budget guard drops the seat to scripted play two turns before the
-  stop, so this should be unreachable in practice.
-- **`fault`** — always a defect; CI asserts it never occurs on the fixture seeds.
+- **`deadline`** — the wall-clock stop fired.
+- **`fault`** — an unfinished failed episode (player defect, missing decision,
+  or provider/infrastructure error); terminates unscored with no `results.json`
+  and a non-zero exit code. CI asserts it never occurs on the fixture seeds.
 
 `results.endRule` is its own closed enum:
 `death | allUnlocked | turnCap | tickCap | wallClock | fault`, and

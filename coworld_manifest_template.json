@@ -636,6 +636,30 @@
   },
   "player": [
     {
+      "id": "llm",
+      "type": "player",
+      "name": "llm",
+      "description": "Native LLM player: registers a strategy prompt with the server and plays via the hosted model interface.",
+      "image": "{{CRAFTER_IMAGE}}",
+      "run": [
+        "/bin/crafter-player"
+      ],
+      "source_url": "https://github.com/Metta-AI/cogame-crafter",
+      "env": {
+        "PLAYER_PROMPT": "Climb the achievement tree in dependency order while keeping health, food, drink, and energy safe. Collect wood, place a table, craft tools, mine stone, coal, iron, and diamond, and shelter before sleeping at night.",
+        "PLAYER_POLICY_LABEL": "llm"
+      },
+      "resources": {
+        "requests": {
+          "cpu": "100m",
+          "memory": "64Mi"
+        },
+        "limits": {
+          "cpu": "1"
+        }
+      }
+    },
+    {
       "id": "forager",
       "type": "player",
       "name": "forager",

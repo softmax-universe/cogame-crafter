@@ -135,6 +135,11 @@ proc rateGuardBlocked(engine: var DecisionEngine): bool =
 proc noteRequest*(engine: var DecisionEngine) =
   engine.requestTimes.add(getMonoTime())
 
+proc isPlayerDefect*(cause: string): bool =
+  ## Distinguishes model-generated invalid/unparseable replies from
+  ## infrastructure/provider/budget failures.
+  cause == "parse_error"
+
 proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
            elapsedSeconds: int): TurnDecision =
   ## Runs ONE decision turn for the single seat and returns its plan plus the
@@ -149,7 +154,7 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
   ## Throttle state is PER TURN: a 429 on turn k says nothing about turn k+1.
   engine.client.throttled = false
 
-  # --- budget guard: settle EARLY rather than overrun ----------------------
+  # --- budget guard: fail cleanly rather than overrun or substitute --------
   if not engine.llmOff:
     let turnSeconds = (sim.config.turnBudgetMs + 999) div 1000
     if elapsedSeconds + 2 * turnSeconds > sim.config.wallClockBudgetSeconds:
@@ -193,7 +198,7 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
   let observation = sim.observationJson(includeNotes = true)
   var attempt = 0
   var open = true
-  var lastCause = "parse_error"
+  var lastCause = ""
   var lastDetail = ""
   while open and attempt < 2:
     if engine.client.disabled:
@@ -231,7 +236,6 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
     if not engine.trajectory.isNil:
       evidence = nativeAttempt(engine.seats[seat].label, turnIndex,
         attempt, request.body)
-    var cause = "parse_error"
     try:
       if not engine.trajectory.isNil:
         evidence.receiveNativeResponse(responses[0].response,
@@ -248,14 +252,31 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
       result.ok = true
       result.directive = directive
       open = false
+    except DirectiveError as error:
+      if not engine.trajectory.isNil:
+        evidence.rejectionReason = some(error.msg)
+      lastCause = "parse_error"
+      lastDetail = error.msg
+      result.records.add(
+        fallbackRecord(turnIndex, attempt + 1, lastCause, error.msg))
+      if attempt == 0:
+        echo "crafter llm: seat ", seat, " attempt 1 failed, will retry: ",
+          error.msg
+      else:
+        echo "crafter llm: seat ", seat, " attempt 2 failed: ", error.msg
     except CatchableError as error:
       if not engine.trajectory.isNil:
         evidence.rejectionReason = some(error.msg)
-      if responses[0].error.len > 0:
-        cause = (if "timeout" in responses[0].error.toLowerAscii():
-                   "timeout" else: "transport_error")
-      elif error.msg.startsWith("llm throttled"):
-        cause = "throttled"
+      let cause =
+        if responses[0].error.len > 0:
+          if "timeout" in responses[0].error.toLowerAscii():
+            "timeout" else: "transport_error"
+        elif error.msg.startsWith("llm throttled"):
+          "throttled"
+        elif error.msg.startsWith("llm auth failed"):
+          "auth_error"
+        else:
+          "provider_error"
       lastCause = cause
       lastDetail = error.msg
       result.records.add(
@@ -276,11 +297,12 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
   if open:
     result.ok = false
     let cause =
-      if engine.client.disabled or engine.client.transport == ltNone:
+      if lastCause.len > 0: lastCause
+      elif engine.client.disabled or engine.client.transport == ltNone:
         "no_credentials"
       elif engine.llmOff: "budget_guard"
       elif engine.client.throttled: "throttled"
-      else: lastCause
+      else: "provider_error"
     result.failureCause = cause
     result.failureDetail =
       if lastDetail.len > 0: lastDetail else: "no usable reply"

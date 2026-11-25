@@ -37,19 +37,26 @@ suite "the manifest pins":
     check "tokens" in m["game"]["config_schema"]["required"].getElems().mapIt(
       it.getStr()).toHashSet()
 
-  test "exactly one declared player, and it is seated in the fixture":
-    ## Every declared player must occupy a certification slot (raid 0.1.2).
-    check m["player"].len == 1
-    let declared = m["player"][0]["id"].getStr()
-    check declared == "forager"
+  test "native LLM player is first, scripted baseline is separate, and certification seats forager":
+    check m["player"].len == 2
+    let llmPlayer = m["player"][0]
+    let scriptedPlayer = m["player"][1]
+    check llmPlayer["id"].getStr() == "llm"
+    check llmPlayer["env"].hasKey("PLAYER_PROMPT")
+    check llmPlayer["env"]["PLAYER_PROMPT"].getStr().strip().len > 0
+    check not llmPlayer["env"].hasKey("PLAYER_SCRIPTED")
+    check scriptedPlayer["id"].getStr() == "forager"
+    check scriptedPlayer["env"]["PLAYER_SCRIPTED"].getStr() == "forager"
+    check not scriptedPlayer["env"].hasKey("PLAYER_PROMPT")
     check m["certification"]["players"].len == 1
-    check m["certification"]["players"][0]["player_id"].getStr() == declared
+    check m["certification"]["players"][0]["player_id"].getStr() == "forager"
     check m["certification"]["game_config"]["players"].len == 1
-    ## `limits.cpu` must be at least "1" (pistonball 0.1.1).
-    check m["player"][0]["resources"]["limits"]["cpu"].getStr() == "1"
-    check m["player"][0]["image"].getStr() == "{{CRAFTER_IMAGE}}"
-    check m["player"][0]["run"][0].getStr() == "/bin/crafter-player"
-    check m["player"][0]["description"].getStr().len > 20
+    for player in m["player"]:
+      ## `limits.cpu` must be at least "1" (pistonball 0.1.1).
+      check player["resources"]["limits"]["cpu"].getStr() == "1"
+      check player["image"].getStr() == "{{CRAFTER_IMAGE}}"
+      check player["run"][0].getStr() == "/bin/crafter-player"
+      check player["description"].getStr().len > 20
 
   test "every array in config_schema carries minItems and maxItems":
     ## The tandem 0.1.0 scar.

@@ -146,7 +146,19 @@ proc recordRejectedDecision*(trajectory: DecisionTrajectory, turn: int,
 proc finishNativeTrajectory*(trajectory: DecisionTrajectory, sim: SimServer) =
   if trajectory.isNil:
     return
-  let outcome = parseJson(sim.runResultsJson())
-  trajectory.finish(if sim.endReason == erComplete: esCompleted else: esFailed,
-    outcome, %*{"0": {"score": outcome["scores"][0]}})
+  if sim.endReason == erComplete:
+    let outcome = parseJson(sim.runResultsJson())
+    trajectory.finish(esCompleted, outcome,
+      %*{"0": {"score": outcome["scores"][0]}})
+  else:
+    let outcome = %*{
+      "reason": $sim.endReason,
+      "endRule": $sim.endRule,
+      "variant": sim.config.variant,
+      "seed": sim.config.seed,
+      "stopDetail": sim.stopDetail,
+      "turnsPlayed": sim.turnsPlayed,
+      "finalTick": sim.survivalTicks()
+    }
+    trajectory.finish(esFailed, outcome, newJObject())
   trajectory.writeEventsToUri(getEnv(CogameSaveTrajectoryUriEnv))

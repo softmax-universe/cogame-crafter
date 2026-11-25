@@ -16,13 +16,27 @@ class Provider(BaseHTTPRequestHandler):
         assert self.headers["X-Coworld-Player-Slot"] == "0"
         assert request["messages"][-1] == {"role": "assistant", "content": "{"}
         Provider.calls += 1
+        if MODE == "provider_error":
+            body = json.dumps(
+                {"type": "error", "error": {"type": "api_error", "message": "upstream 500"}}
+            ).encode()
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header(
+                "x-softmax-llm-call-id",
+                f"00000000-0000-4000-8000-{Provider.calls:012d}",
+            )
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if MODE == "reject":
             # Turn 1 attempt 1 fails with an invalid action; attempt 2 fails
-            # with surrounding prose, forcing a clean rejection/forfeit.
+            # with ambiguous multiple objects, forcing a clean rejection.
             if Provider.calls == 1:
                 text = '"actions":[{"act":"invalid-command"},{"act":"noop"}],"say":"","notes":""}'
             else:
-                text = '"actions":[{"act":"noop"}]} extra prose'
+                text = '"actions":[{"act":"noop"}]} {"actions":[{"act":"do"}]}'
         else:
             # Turn 1 attempt 1 fails; attempt 2 returns a canonical prefill
             # continuation. Turn 2 returns a single markdown JSON code fence.

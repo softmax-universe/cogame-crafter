@@ -285,6 +285,7 @@ jobs:
         env:
           SMOKE_SLUG: ${{ env.SLUG }}
           SMOKE_REQUIRE_REPLAY_JSON: "0"
+          SMOKE_EXTRA_ENV: "PLAYER_PROMPT= PLAYER_SCRIPTED=forager PLAYER_POLICY_LABEL=forager"
         run: ./tools/ci/docker_smoke.sh "${IMAGE}:ci"
 
       - name: The replay summary is strict UTF-8 JSON

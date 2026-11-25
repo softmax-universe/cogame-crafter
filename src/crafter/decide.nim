@@ -115,16 +115,13 @@ proc resultRecord*(sim: SimServer): string =
 #  The turn
 # ---------------------------------------------------------------------------
 
-proc holdFallbackDirective*(): Directive =
-  ## Empty no-op plan for scored LLM failures (never runs `foragerPlan`).
-  Directive(actions: @[], source: dsFallback)
-
-proc foragerFallback*(sim: SimServer): Directive =
-  ## THE fallback plan, computed server-side by the SAME proc the `forager`
-  ## baseline uses. `tests/test_crafter_driver.nim` asserts the two resolve
-  ## to one proc so they cannot drift.
-  result = foragerPlan(sim)
-  result.source = dsFallback
+type
+  TurnDecision* = object
+    ok*: bool
+    directive*: Directive
+    failureCause*: string
+    failureDetail*: string
+    records*: seq[string]
 
 proc rateGuardBlocked(engine: var DecisionEngine): bool =
   let now = getMonoTime()
@@ -138,12 +135,17 @@ proc rateGuardBlocked(engine: var DecisionEngine): bool =
 proc noteRequest*(engine: var DecisionEngine) =
   engine.requestTimes.add(getMonoTime())
 
+proc isPlayerDefect*(cause: string): bool =
+  ## Distinguishes model-generated invalid/unparseable replies from
+  ## infrastructure/provider/budget failures.
+  cause == "parse_error"
+
 proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
-           elapsedSeconds: int): tuple[directive: Directive,
-                                       records: seq[string]] =
+           elapsedSeconds: int): TurnDecision =
   ## Runs ONE decision turn for the single seat and returns its plan plus the
-  ## replay chat records the turn produced. NEVER RAISES: every failure path
-  ## ends in a legal plan.
+  ## replay chat records the turn produced. Never inserts a fallback move when
+  ## an LLM seat fails; returns `ok = false` with `failureCause` and
+  ## `failureDetail` so the server can record evidence and terminate cleanly.
   let
     seat = 0
     budget = initDuration(milliseconds = max(1, sim.config.turnBudgetMs))
@@ -152,7 +154,7 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
   ## Throttle state is PER TURN: a 429 on turn k says nothing about turn k+1.
   engine.client.throttled = false
 
-  # --- budget guard: settle EARLY rather than overrun ----------------------
+  # --- budget guard: fail cleanly rather than overrun or substitute --------
   if not engine.llmOff:
     let turnSeconds = (sim.config.turnBudgetMs + 999) div 1000
     if elapsedSeconds + 2 * turnSeconds > sim.config.wallClockBudgetSeconds:
@@ -160,10 +162,11 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
       result.records.add(budgetGuardRecord(turnIndex,
         max(0, sim.config.wallClockBudgetSeconds - elapsedSeconds)))
       echo "crafter: budget guard fired at turn ", turnIndex,
-        "; remaining turns play scripted"
+        "; wall-clock budget exhausted for LLM turns"
 
   # --- a scripted seat computes locally, instantly, and consumes no request -
   if not engine.seats[seat].isLlm:
+    result.ok = true
     result.directive = scriptedPlan(sim, engine.seats[seat].baseline)
     return
 
@@ -175,13 +178,12 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
   elif engine.rateGuardBlocked():
     blockedCause = "rate_guard"
   if blockedCause.len > 0:
-    ## An LLM seat that CANNOT call the LLM this turn is a FALLBACK, not a
-    ## scripted policy, and the design's `fallback.cause` enum names every
-    ## reason it happens. Recording it is what makes the two countable.
-    result.directive = holdFallbackDirective()
+    result.ok = false
+    result.failureCause = blockedCause
+    result.failureDetail = "LLM unavailable for this turn (" & blockedCause & ")"
     result.records.add(fallbackRecord(turnIndex, 1, blockedCause,
-      "the LLM is unavailable for this turn; executing empty hold plan"))
-    echo "crafter llm: seat ", seat, " falling back to empty hold (", blockedCause,
+      result.failureDetail))
+    echo "crafter llm: seat ", seat, " failed (", blockedCause,
       ") on turn ", turnIndex
     return
 
@@ -196,28 +198,29 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
   let observation = sim.observationJson(includeNotes = true)
   var attempt = 0
   var open = true
+  var lastCause = ""
+  var lastDetail = ""
   while open and attempt < 2:
     if engine.client.disabled:
       break
     let remainingMs = (budget - (getMonoTime() - turnStart)).inMilliseconds.int
     if remainingMs <= 0:
+      lastCause = "timeout"
+      lastDetail = "per-turn budget exhausted before attempt " & $(attempt + 1)
       result.records.add(fallbackRecord(turnIndex, attempt + 1, "timeout",
-        "per-turn budget exhausted before attempt " & $(attempt + 1)))
+        lastDetail))
       break
     ## turnBudgetMs is a monotonic deadline around the WHOLE turn, the
     ## turnSpacingMs rate floor included, so an attempt is given the SMALLER of
-    ## its configured deadline and the time the turn has left. Unclamped, a
-    ## 2.6 s spacing sleep plus a 6 s attempt 1 left this guard satisfied at
-    ## 8.6 s and a full 3 s retry then ran the turn to 11.6 s, past the 9.5 s
-    ## the note's episode arithmetic budgets per turn.
+    ## its configured deadline and the time the turn has left.
     let deadlineMs = min(
       (if attempt == 0: sim.config.attempt1Ms else: sim.config.retryMs),
       remainingMs)
     var user = $observation
     if attempt > 0:
-      user.add("\n\nYour previous reply was not usable. Reply with ONLY the " &
-        "JSON object described above, starting with '{', with an " &
-        "\"actions\" array.")
+      user.add("\n\nYour previous reply was rejected (" &
+        lastDetail.truncateRunes(120) &
+        "). Reply with ONLY one valid JSON object containing an \"actions\" array.")
     let request = engine.client.requestFor(
       systemPrompt(engine.selection), userMessage(engine.seats[seat].prompt, user), seat)
     ## ONE seat, so this is a batch of ONE through the starter's unchanged
@@ -226,10 +229,6 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
     batch.post(request.url, request.headers, request.body, $seat)
     let started = getMonoTime()
     engine.noteRequest()
-    ## curly hands the deadline to CURLOPT_TIMEOUT, whose granularity is WHOLE
-    ## SECONDS, so this conversion FLOORS — and sim_config REJECTS a
-    ## sub-second value, so the floor below is an identity: 6000 -> 6 s,
-    ## 3000 -> 3 s, worst case 9 s inside the 9.5 s turnBudgetMs cap.
     let responses = engine.client.curl.makeRequests(
       batch, max(1, deadlineMs div 1000))
     let latency = (getMonoTime() - started).inMilliseconds.int
@@ -237,7 +236,6 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
     if not engine.trajectory.isNil:
       evidence = nativeAttempt(engine.seats[seat].label, turnIndex,
         attempt, request.body)
-    var cause = "parse_error"
     try:
       if not engine.trajectory.isNil:
         evidence.receiveNativeResponse(responses[0].response,
@@ -250,22 +248,39 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
       directive.latencyMs = latency
       if not engine.trajectory.isNil:
         evidence.parsedAction = directive.directiveAction()
-        evidence.accepted = directive.dropped == 0 and directive.overCap == 0
-        if not evidence.accepted:
-          evidence.rejectionReason = some("native parser dropped or capped proposed actions")
+        evidence.accepted = true
+      result.ok = true
       result.directive = directive
       open = false
+    except DirectiveError as error:
+      if not engine.trajectory.isNil:
+        evidence.rejectionReason = some(error.msg)
+      lastCause = "parse_error"
+      lastDetail = error.msg
+      result.records.add(
+        fallbackRecord(turnIndex, attempt + 1, lastCause, error.msg))
+      if attempt == 0:
+        echo "crafter llm: seat ", seat, " attempt 1 failed, will retry: ",
+          error.msg
+      else:
+        echo "crafter llm: seat ", seat, " attempt 2 failed: ", error.msg
     except CatchableError as error:
-      evidence.rejectionReason = some(error.msg)
-      if responses[0].error.len > 0:
-        cause = (if "timeout" in responses[0].error.toLowerAscii():
-                   "timeout" else: "transport_error")
-      elif error.msg.startsWith("llm throttled"):
-        cause = "throttled"
+      if not engine.trajectory.isNil:
+        evidence.rejectionReason = some(error.msg)
+      let cause =
+        if responses[0].error.len > 0:
+          if "timeout" in responses[0].error.toLowerAscii():
+            "timeout" else: "transport_error"
+        elif error.msg.startsWith("llm throttled"):
+          "throttled"
+        elif error.msg.startsWith("llm auth failed"):
+          "auth_error"
+        else:
+          "provider_error"
+      lastCause = cause
+      lastDetail = error.msg
       result.records.add(
         fallbackRecord(turnIndex, attempt + 1, cause, error.msg))
-      ## Attempt 1 says WILL RETRY. Only a genuine second failure may say
-      ## "falling back" — that is the phrase phase 60 greps the game log for.
       if attempt == 0:
         echo "crafter llm: seat ", seat, " attempt 1 failed, will retry: ",
           error.msg
@@ -275,25 +290,23 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
       engine.nativeAttempts.add(evidence)
     inc attempt
     if engine.client.throttled and open:
-      ## FAIL FAST. The only model left answered 429, so the retry batch would
-      ## be refused the same way.
-      echo "crafter llm: provider throttled with no other candidate; ",
-        "seat falls back for turn ", turnIndex
+      echo "crafter llm: provider throttled on turn ", turnIndex
       break
 
   if open:
-    result.directive = holdFallbackDirective()
+    result.ok = false
     let cause =
-      if engine.client.disabled or engine.client.transport == ltNone:
+      if lastCause.len > 0: lastCause
+      elif engine.client.disabled or engine.client.transport == ltNone:
         "no_credentials"
       elif engine.llmOff: "budget_guard"
       elif engine.client.throttled: "throttled"
-      else: "parse_error"
-    result.records.add(fallbackRecord(turnIndex, 2, cause,
-      "seat fell back to empty hold plan"))
-    ## "falling back" is the phrase phase 60 greps the GAME log for.
-    echo "crafter llm: seat ", seat, " falling back to empty hold (", cause,
-      ") on turn ", turnIndex
+      else: "provider_error"
+    result.failureCause = cause
+    result.failureDetail =
+      if lastDetail.len > 0: lastDetail else: "no usable reply"
+    echo "crafter llm: seat ", seat, " rejected (", cause,
+      ") on turn ", turnIndex, ": ", result.failureDetail
 
 proc applyDirective*(sim: var SimServer, directive: Directive,
                      view: JsonNode): string =

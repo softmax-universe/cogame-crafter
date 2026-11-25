@@ -65,26 +65,44 @@ def play(variant, seed, wording="canonical", prompt_seed=0, repair=False):
             assert messages[0]["content"] == system
             proposal = json.loads(request({"kind": "teacher"})["response"])
             if repair:
+                if not trace:
+                    for bad_response in (
+                        json.dumps({**proposal, "actions": [{"act": "unknown-command"}]}),
+                        f"Sure:\n```json\n{json.dumps(proposal)}\n```",
+                        json.dumps(proposal) + " " + json.dumps(proposal),
+                        json.dumps({**proposal, "actions": [{"do": "noop"}]}),
+                        json.dumps({**proposal, "actions": [{"act": "move", "dir": "N"}]}),
+                    ):
+                        rejected = request(
+                            {
+                                "kind": "step",
+                                "decision_id": len(trace),
+                                "response": bad_response,
+                            }
+                        )
+                        assert rejected["kind"] == "rejected", rejected
                 proposal["say"] = "雪" * 180
                 proposal["notes"] = "森" * 430
-                proposal["actions"].insert(0, {"act": "unknown-command"})
                 if trace:
                     assert view["notes"] == "森" * 400
+                wire = (
+                    f"```json\n{json.dumps(proposal)}\n```"
+                    if len(trace) % 2 == 0
+                    else json.dumps(proposal)
+                )
+            else:
+                wire = json.dumps(proposal)
             result = request(
                 {
                     "kind": "step",
                     "decision_id": len(trace),
-                    "response": json.dumps(proposal),
+                    "response": wire,
                 }
             )
             assert result["kind"] == "accepted"
             if repair:
                 assert result["action"]["say"] == "雪" * 160
                 assert result["action"]["notes"] == "森" * 400
-                assert all(
-                    action["act"] != "unknown-command"
-                    for action in result["action"]["actions"]
-                )
             else:
                 assert result["action"] == proposal
             trace.append((view, messages, result["action"]))

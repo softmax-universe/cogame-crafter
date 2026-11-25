@@ -98,7 +98,6 @@ proc recordAppliedDecision*(trajectory: DecisionTrajectory, turn: int,
       status = asRejected
   of dsFallback:
     status = asFallback
-    fallback = some("scripted-forager")
     for attempt in attempts.mitems:
       attempt.accepted = false
   of dsScripted:
@@ -122,10 +121,44 @@ proc recordAppliedDecision*(trajectory: DecisionTrajectory, turn: int,
   trajectory.recordDecision("turn-" & $turn, "0", privateView, attempts,
     selected, action, status, fallbackOrigin = fallback)
 
+proc recordRejectedDecision*(trajectory: DecisionTrajectory, turn: int,
+    observation: JsonNode, selection: PromptSelection, operatorPrompt: string,
+    evidence: seq[DecisionAttempt]) =
+  if trajectory.isNil:
+    return
+  var attempts = evidence
+  for attempt in attempts.mitems:
+    attempt.accepted = false
+  let status = if attempts.len > 0: asRejected else: asMissing
+  var privateView = copy(observation)
+  privateView["prompt_template"] = selection.promptMetadata(
+    systemPrompt(selection), userMessage(operatorPrompt, $observation))
+  privateView["prompt_attempts"] = newJArray()
+  for attempt in attempts:
+    if attempt.origin == aoModel:
+      privateView["prompt_attempts"].add(%*{"attempt_id": attempt.attemptId,
+        "prompt_template": selection.promptMetadata(
+          attempt.request["system"].getStr(),
+          attempt.request["messages"][0]["content"].getStr())})
+  trajectory.recordDecision("turn-" & $turn, "0", privateView, attempts,
+    none(string), newJNull(), status)
+
 proc finishNativeTrajectory*(trajectory: DecisionTrajectory, sim: SimServer) =
   if trajectory.isNil:
     return
-  let outcome = parseJson(sim.runResultsJson())
-  trajectory.finish(if sim.endReason == erComplete: esCompleted else: esFailed,
-    outcome, %*{"0": {"score": outcome["scores"][0]}})
+  if sim.endReason == erComplete:
+    let outcome = parseJson(sim.runResultsJson())
+    trajectory.finish(esCompleted, outcome,
+      %*{"0": {"score": outcome["scores"][0]}})
+  else:
+    let outcome = %*{
+      "reason": $sim.endReason,
+      "endRule": $sim.endRule,
+      "variant": sim.config.variant,
+      "seed": sim.config.seed,
+      "stopDetail": sim.stopDetail,
+      "turnsPlayed": sim.turnsPlayed,
+      "finalTick": sim.survivalTicks()
+    }
+    trajectory.finish(esFailed, outcome, newJObject())
   trajectory.writeEventsToUri(getEnv(CogameSaveTrajectoryUriEnv))

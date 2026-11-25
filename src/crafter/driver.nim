@@ -7,7 +7,6 @@
 ## the cog has never seen, which is why walking into the unknown costs an
 ## explicit `move`.
 
-import std/strutils
 import sim_types, world
 
 type
@@ -53,10 +52,9 @@ const
     pMakeWoodSword, pMakeStoneSword, pMakeIronSword]
 
 proc parseActionKind*(text: string): tuple[ok: bool, kind: ActionKind] =
-  ## Lower-cased and `-` -> `_` normalised before matching.
-  let key = text.strip().toLowerAscii().replace("-", "_")
+  ## Exact canonical action names only.
   for kind in ActionKind:
-    if $kind == key:
+    if $kind == text:
       return (true, kind)
   (false, akNoop)
 

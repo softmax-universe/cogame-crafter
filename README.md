@@ -100,6 +100,10 @@ One image, two entrypoints, and the whole policy set switched by environment:
 ```bash
 coworld upload-policy coworld-crafter:latest --name my-crafter \
   --run /bin/crafter-player --secret-env PLAYER_PROMPT="<your strategy>"
+
+# Separate scripted baseline upload (not bundled in the solo release manifest):
+coworld upload-policy coworld-crafter:latest --name crafter-forager \
+  --run /bin/crafter-player --env PLAYER_SCRIPTED=forager --env PLAYER_POLICY_LABEL=forager
 ```
 
 | Env | Effect |
@@ -108,9 +112,9 @@ coworld upload-policy coworld-crafter:latest --name my-crafter \
 | `PLAYER_SCRIPTED` | `forager` \| `wanderer` — this seat is scripted |
 | `PLAYER_POLICY_LABEL` | a free label for the replay's `register` record |
 
-A seat that sets neither is `forager`, which is also the server-side fallback
-whenever a seat's LLM call fails twice — so no failure mode ever leaves the cog
-without an action.
+A seat that sets neither is `forager`. LLM seats that fail to produce a valid
+reply after their single retry fail the episode cleanly via player failure
+rather than substituting a scripted fallback move.
 
 The shipped set (`tools/ci/policies.json`) is two `PLAYER_PROMPT` champions —
 `crafter-techtree` (climb the tree, everything else is logistics) and

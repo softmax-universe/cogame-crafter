@@ -2,9 +2,9 @@
 import std/[json, os, osproc, streams, strutils, tempfiles]
 import crafter/[sim, decide, prompts, training]
 
-proc run(variant: string, destination: string): string =
+proc run(variant: string, destination: string, mode = "complete"): string =
   let provider = startProcess("python3", args = [
-    currentSourcePath().parentDir() / "native_capture_provider.py"],
+    currentSourcePath().parentDir() / "native_capture_provider.py", mode],
     options = {poUsePath, poStdErrToStdOut})
   defer:
     provider.terminate()
@@ -13,7 +13,7 @@ proc run(variant: string, destination: string): string =
   let port = provider.outputStream.readLine()
   putEnv("COWORLD_LLM_ENDPOINT", "http://127.0.0.1:" & port)
   putEnv("COWORLD_LLM_MODEL", "native-capture-fixture")
-  putEnv("COWORLD_EPISODE_ID", "native-capture-" & variant)
+  putEnv("COWORLD_EPISODE_ID", "native-capture-" & variant & "-" & mode)
   putEnv("COWORLD_GAME_VERSION", "capture-fixture")
   putEnv("COWORLD_SOURCE_REVISION", repeat('a', 40))
   if destination.len > 0:
@@ -46,17 +46,55 @@ proc run(variant: string, destination: string): string =
       let privateView = game.observationJson(includeNotes = true)
       let publicView = game.observationJson(includeNotes = false)
       let decision = engine.turn(game, turn, 0)
+      if not decision.ok:
+        engine.trajectory.recordRejectedDecision(turn, privateView, selection,
+          engine.seats[0].prompt, engine.nativeAttempts)
+        if isPlayerDefect(decision.failureCause):
+          game.deadSeats[0] = true
+        game.applyStop(edFault,
+          decision.failureCause & ": " & decision.failureDetail)
+        break
       let applied = game.applyDirective(decision.directive, publicView)
       doAssert "PRIVATE_CAPTURE_SENTINEL" notin applied
       engine.trajectory.recordAppliedDecision(turn, privateView, selection,
         engine.seats[0].prompt, game, decision.directive, applied,
         engine.nativeAttempts, engine.seats[0].label)
     game.step()
-  doAssert game.endReason == erComplete
+  if mode in ["reject", "provider_error"]:
+    doAssert game.endReason == erFault
+    doAssert game.endRule == edFault
+    if mode == "reject":
+      doAssert game.deadSeats[0]
+      doAssert game.stopDetail.startsWith("parse_error:")
+    else:
+      doAssert not game.deadSeats[0]
+      doAssert game.stopDetail.startsWith("provider_error:")
+  else:
+    doAssert game.endReason == erComplete
   engine.trajectory.finishNativeTrajectory(game)
-  result = game.runResultsJson()
+  result = if game.endReason == erComplete: game.runResultsJson()
+           else: $(%*{"reason": $game.endReason, "endRule": $game.endRule,
+                      "stopDetail": game.stopDetail})
   if destination.len > 0:
     let lines = readFile(destination).strip().splitLines()
+    if mode in ["reject", "provider_error"]:
+      doAssert lines.len == 2
+      let rejected = parseJson(lines[0])
+      doAssert rejected["action_status"].getStr() == "rejected"
+      doAssert rejected["selected_attempt_id"].kind == JNull
+      doAssert rejected["executed_action"].kind == JNull
+      doAssert rejected["attempts"].len == 2
+      doAssert not rejected["attempts"][0]["accepted"].getBool()
+      doAssert not rejected["attempts"][1]["accepted"].getBool()
+      let terminal = parseJson(lines[^1])
+      doAssert terminal["status"].getStr() == "failed"
+      doAssert not terminal["outcome"].hasKey("scores")
+      doAssert not terminal["outcome"].hasKey("win")
+      doAssert not terminal["outcome"].hasKey("winner")
+      doAssert terminal["outcome"]["reason"].getStr() == "fault"
+      doAssert terminal["outcome"]["endRule"].getStr() == "fault"
+      doAssert terminal["participant_outcomes"] == newJObject()
+      return
     doAssert lines.len > 3
     let first = parseJson(lines[0])
     doAssert first["attempts"].len == 2
@@ -77,17 +115,11 @@ proc run(variant: string, destination: string): string =
     doAssert promptAttempts[1]["prompt_template"] == selection.promptMetadata(
       accepted["request"]["system"].getStr(),
       accepted["request"]["messages"][0]["content"].getStr())
-    let second = parseJson(lines[1])
-    doAssert second["action_status"].getStr() == "fallback"
-    doAssert second["selected_attempt_id"].kind == JNull
-    doAssert second["attempts"].len == 2
-    doAssert not second["attempts"][0]["accepted"].getBool()
-    doAssert not second["attempts"][1]["accepted"].getBool()
-    let normalized = parseJson(lines[2])
-    doAssert normalized["action_status"].getStr() == "rejected"
-    doAssert normalized["selected_attempt_id"].kind == JNull
-    doAssert not normalized["attempts"][0]["accepted"].getBool()
-    doAssert normalized["executed_action"]["actions"] == %*[{"act": "noop"}]
+    let fencedTurn = parseJson(lines[1])
+    doAssert fencedTurn["action_status"].getStr() == "accepted"
+    doAssert fencedTurn["attempts"].len == 1
+    doAssert fencedTurn["attempts"][0]["accepted"].getBool()
+    doAssert fencedTurn["executed_action"]["actions"] == %*[{"act": "noop"}]
     let terminal = parseJson(lines[^1])
     doAssert terminal["status"].getStr() == "completed"
     doAssert terminal["outcome"] == parseJson(result)
@@ -99,4 +131,10 @@ for variant in ["standard", "longnight"]:
   let captured = run(variant, output / (variant & ".jsonl"))
   let ordinary = run(variant, "")
   doAssert captured == ordinary, "capture changed ordinary native game outcomes"
-echo "complete native episodes: exact prefill/retries/normalization/fallbacks/private capture and outcome parity passed"
+  let rejectedCaptured = run(variant, output / (variant & "-reject.jsonl"), "reject")
+  let rejectedOrdinary = run(variant, "", "reject")
+  doAssert rejectedCaptured == rejectedOrdinary, "capture changed rejected native game outcomes"
+  let providerCaptured = run(variant, output / (variant & "-provider.jsonl"), "provider_error")
+  let providerOrdinary = run(variant, "", "provider_error")
+  doAssert providerCaptured == providerOrdinary, "capture changed provider-error native game outcomes"
+echo "complete native episodes: exact prefill/retries/fences/rejections/provider-errors/private capture and outcome parity passed"

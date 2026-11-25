@@ -138,14 +138,22 @@ proc step(command: JsonNode): JsonNode =
   if command["decision_id"].getInt() != decisionId:
     return %*{"kind": "rejected", "reason": "stale decision"}
   doAssert game.phase == Playing
-  let candidate = extractJsonObject(command["response"].getStr())
-  var plan = candidate
-  if not textMode:
-    let choice = candidate["choice"].getInt()
-    let view = game.observationJson(includeNotes = true)
-    doAssert choice in 0 ..< ChoiceCount and candidates(view)[choice].kind != JNull
-    plan = planFor(choice, view)
-  let directive = parseDirective(plan, game.config.maxActionsPerTurn)
+  var candidate, plan: JsonNode
+  var directive: Directive
+  try:
+    candidate = extractJsonObject(command["response"].getStr())
+    plan = candidate
+    if not textMode:
+      if not candidate.hasKey("choice") or candidate["choice"].kind != JInt:
+        raise newException(DirectiveError, "reply must include integer \"choice\"")
+      let choice = candidate["choice"].getInt()
+      let view = game.observationJson(includeNotes = true)
+      if choice notin 0 ..< ChoiceCount or candidates(view)[choice].kind == JNull:
+        raise newException(DirectiveError, "invalid choice: " & $choice)
+      plan = planFor(choice, view)
+    directive = parseDirective(plan, game.config.maxActionsPerTurn)
+  except DirectiveError as error:
+    return %*{"kind": "rejected", "reason": error.msg}
   discard game.applyDirective(directive, game.observationJson(includeNotes = false))
   while game.phase == Playing and not game.waitingForPlan():
     game.step()

@@ -1,7 +1,10 @@
 """Loopback Messages fixture for complete native-game capture/parity checks."""
 
 import json
+import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
+
+MODE = sys.argv[1] if len(sys.argv) > 1 else "complete"
 
 
 class Provider(BaseHTTPRequestHandler):
@@ -13,15 +16,44 @@ class Provider(BaseHTTPRequestHandler):
         assert self.headers["X-Coworld-Player-Slot"] == "0"
         assert request["messages"][-1] == {"role": "assistant", "content": "{"}
         Provider.calls += 1
-        # The first decision retries successfully; the second exhausts retries.
-        text = (
-            "unusable reply"
-            if Provider.calls in (1, 3, 4)
-            else '"actions":[{"act":"noop"}],"say":"",'
-            '"notes":"PRIVATE_CAPTURE_SENTINEL"}'
-        )
-        if Provider.calls == 5:
-            text = '"actions":[{"act":"invalid-command"},{"act":"noop"}],"say":"","notes":""}'
+        if MODE == "provider_error":
+            body = json.dumps(
+                {"type": "error", "error": {"type": "api_error", "message": "upstream 500"}}
+            ).encode()
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header(
+                "x-softmax-llm-call-id",
+                f"00000000-0000-4000-8000-{Provider.calls:012d}",
+            )
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if MODE == "reject":
+            # Turn 1 attempt 1 fails with an invalid action; attempt 2 fails
+            # with ambiguous multiple objects, forcing a clean rejection.
+            if Provider.calls == 1:
+                text = '"actions":[{"act":"invalid-command"},{"act":"noop"}],"say":"","notes":""}'
+            else:
+                text = '"actions":[{"act":"noop"}]} {"actions":[{"act":"do"}]}'
+        else:
+            # Turn 1 attempt 1 fails; attempt 2 returns a canonical prefill
+            # continuation. Turn 2 returns a single markdown JSON code fence.
+            if Provider.calls == 1:
+                text = "unusable reply"
+            elif Provider.calls == 3:
+                text = (
+                    "```json\n"
+                    '{"actions":[{"act":"noop"}],"say":"",'
+                    '"notes":"PRIVATE_CAPTURE_SENTINEL"}\n'
+                    "```"
+                )
+            else:
+                text = (
+                    '"actions":[{"act":"noop"}],"say":"",'
+                    '"notes":"PRIVATE_CAPTURE_SENTINEL"}'
+                )
         body = json.dumps(
             {
                 "model": "native-capture-fixture",

@@ -56,7 +56,7 @@ suite "the scripted baselines are bounded and legal":
     for kind in [blForager, blWanderer]:
       for sim in states:
         let plan = scriptedPlan(sim, kind)
-        check plan.actions.len <= sim.config.maxActionsPerTurn
+        check plan.actions.len <= sim.config.turnTicks
         check plan.say.len == 0
         check plan.notes.len == 0
         check plan.source == dsScripted
@@ -167,7 +167,7 @@ suite "reply validation":
       {"act":"move","dir":"left"},
       {"act":"sleep","n":24}],
       "say":"planning","notes":"scratch"}""")
-    let directive = parseDirective(payload, 12)
+    let directive = parseDirective(payload)
     check directive.dropped == 0
     check directive.overCap == 0
     let kinds = block:
@@ -185,7 +185,7 @@ suite "reply validation":
     check directive.actions[6].dir == fLeft
     check directive.actions[7].n == 24
     ## Empty actions array with optional say/notes omitted is valid.
-    let idle = parseDirective(parseJson("""{"actions":[]}"""), 12)
+    let idle = parseDirective(parseJson("""{"actions":[]}"""))
     check idle.actions.len == 0
     check idle.say == ""
     check idle.notes == ""
@@ -241,12 +241,11 @@ suite "reply validation":
       """{"actions":[],"notes":["x"]}"""
     ]:
       expect DirectiveError:
-        discard parseDirective(parseJson(bad), 12)
+        discard parseDirective(parseJson(bad))
     var overCap = newJArray()
     for i in 0 .. 12:
       overCap.add(%*{"act": "do"})
-    expect DirectiveError:
-      discard parseDirective(%*{"actions": overCap}, 12)
+    check parseDirective(%*{"actions": overCap}).actions.len == overCap.len
 
   test "say and notes truncate on RUNE boundaries with 4-byte emoji on the cap":
     ## Item 23's rune clause. A byte slice would cut a codepoint in half and
@@ -258,7 +257,7 @@ suite "reply validation":
     var notes = ""
     for i in 0 ..< MaxNoteRunes + 40:
       notes.add(emoji)
-    let directive = parseDirective(%*{"actions": [], "say": say, "notes": notes}, 12)
+    let directive = parseDirective(%*{"actions": [], "say": say, "notes": notes})
     check directive.say.runeLen == MaxSayRunes
     check directive.notes.runeLen == MaxNoteRunes
     check directive.say.len == MaxSayRunes * 4  ## whole codepoints, every one

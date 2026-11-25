@@ -56,7 +56,7 @@ Exactly Crafter's seventeen, by name, and nothing else is a primitive:
 `make_wood_pickaxe`, `make_stone_pickaxe`, `make_iron_pickaxe`,
 `make_wood_sword`, `make_stone_sword`, `make_iron_sword`.
 
-A policy sends up to **12 actions per turn**, which the driver expands into at
+A policy sends an ordered action plan each turn, which the driver expands into at
 most **24 primitives** — one per tick — plus two macros (`goto`, `move`) and an
 `n` multiplier on `do` and `sleep`. **Any hit ends the turn early** and throws
 away the rest of the plan, which is what keeps batching from removing
@@ -112,9 +112,7 @@ coworld upload-policy coworld-crafter:latest --name crafter-forager \
 | `PLAYER_SCRIPTED` | `forager` \| `wanderer` — this seat is scripted |
 | `PLAYER_POLICY_LABEL` | a free label for the replay's `register` record |
 
-A seat that sets neither is `forager`. LLM seats that fail to produce a valid
-reply after their single retry fail the episode cleanly via player failure
-rather than substituting a scripted fallback move.
+A model seat receives one request per turn. An invalid reply or provider failure ends the episode without official scores.
 
 The shipped set (`tools/ci/policies.json`) is two `PLAYER_PROMPT` champions —
 `crafter-techtree` (climb the tree, everything else is logistics) and

@@ -18,9 +18,6 @@ import
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
-  ReplyPrefill* = "{"
-    ## The assistant-turn prefill. Re-prefixed before parsing, and guarded
-    ## against a provider that echoes it.
   AnthropicVersion = "2023-06-01"
   BedrockAnthropicVersion = "bedrock-2023-05-31"
   DefaultBedrockModel* = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
@@ -114,17 +111,10 @@ proc requestFor*(
   client: LlmClient, system, user: string, slot: int
 ): tuple[url: string, headers: HttpHeaders, body: string] =
   ## One Messages-API request, shaped for whichever transport is live.
-  ## THE ASSISTANT-TURN PREFILL OF `{`. Both Anthropic Messages and Bedrock
-  ## invoke accept a trailing assistant turn, and it is what stops a model
-  ## from spending the whole token budget on preamble before the JSON (the
-  ## procgen 0.1.2 "cut off at max_tokens" scar — the fix is the prefill,
-  ## never a bigger cap). `textOf` re-prefixes it before parsing and guards a
-  ## provider that echoes it back.
   var body = %*{
     "max_tokens": client.maxOutputTokens,
     "system": system,
-    "messages": [{"role": "user", "content": user},
-                 {"role": "assistant", "content": ReplyPrefill}]
+    "messages": [{"role": "user", "content": user}]
   }
   var headers: HttpHeaders
   if client.transport == ltSidecar and slot >= 0:
@@ -176,25 +166,12 @@ proc textOf*(
   if response.code < 200 or response.code >= 300:
     raise newException(LlmError, "anthropic error " & $response.code & ": " &
       response.body.truncateRunes(MaxFallbackDetailRunes))
-  ## Cap the read at MaxReplyBytes before parsing: a provider body is
-  ## arbitrary bytes and the reply schema bounds what may be read.
-  let payload = parseJson(
-    if response.body.len > 4 * MaxReplyBytes:
-      response.body[0 ..< 4 * MaxReplyBytes]
-    else:
-      response.body)
+  let payload = parseJson(response.body)
   if payload{"stop_reason"}.getStr() == "refusal":
     raise newException(LlmError, "anthropic refusal")
   for contentBlock in payload["content"]:
     if contentBlock{"type"}.getStr() == "text":
       result.add(contentBlock{"text"}.getStr())
-  ## Re-prefix the prefill, unless the provider echoed it back or returned a
-  ## Markdown code fence.
-  let trimmed = result.strip()
-  if not trimmed.startsWith(ReplyPrefill) and not trimmed.startsWith("```"):
-    result = ReplyPrefill & result
-  if result.len > MaxReplyBytes:
-    result = result.truncateRunes(MaxReplyBytes)
   if payload{"stop_reason"}.getStr() == "max_tokens" and '{' notin result:
     raise newException(LlmError, "reply cut off at max_tokens before any " &
       "JSON: " & result.truncateRunes(160).replace("\n", " "))
@@ -244,7 +221,7 @@ STAYING ALIVE
 WHAT YOU SEND
 """
 
-const CanonicalPlanning = """One JSON object with up to 12 actions. They run one per tick, in order, up to 24
+const CanonicalPlanning = """One JSON object with your actions in order. They run one per tick, in order, up to 24
 ticks, then you are asked again. ANY hit you take ENDS YOUR TURN EARLY and
 throws away the rest of your plan - so do not plan 24 ticks of mining with a
 zombie on screen.
@@ -290,12 +267,12 @@ proc systemPrompt*(selection: PromptSelection): string =
     of pvMixed: raise newException(ValueError, "mixed selection must resolve to a training wording")
   let planning = case selection.selectedVariant
     of pvCanonical: CanonicalPlanning
-    of pvPlain: "Submit one JSON object containing at most 12 actions. The plan executes in order, one primitive per tick, for at most 24 ticks before another request. Taking any damage immediately ends the turn and discards unfinished actions. Avoid a long mining plan while a zombie is visible.\n"
-    of pvNumbered: "1. Send a single JSON object with no more than 12 actions.\n2. Actions execute sequentially, one primitive per tick, with a 24-tick turn limit.\n3. Any incoming hit interrupts the turn and discards the remaining plan.\n4. With a zombie on screen, do not commit to 24 ticks of mining.\n"
-    of pvQuestions: "How much can you plan? Up to 12 actions in one JSON object. How do they run? In sequence, one primitive per tick, until the 24-tick limit and the next request. What if you are hit? The turn ends immediately and the rest is discarded. Should you mine for 24 ticks with a zombie visible? No.\n"
-    of pvReordered: "Any hit interrupts your turn and cancels its remaining actions; avoid 24-tick mining plans with a zombie on screen. Otherwise your ordered plan runs one primitive per tick, for at most 24 ticks before you are asked again. Send at most 12 actions in a single JSON object.\n"
-    of pvHeldoutBriefing: "Plan a bounded sequence: a single JSON object may hold up to 12 actions. Execution proceeds in order at one primitive per tick, stopping for a new request after at most 24 ticks. Damage cuts the turn short and throws away unfinished work. A visible zombie makes a 24-tick mining commitment unwise.\n"
-    of pvHeldoutReference: "Submission: one JSON object, at most 12 actions. Execution: ordered primitives, one per tick, no more than 24 ticks per turn. Interruption: any hit ends the turn and drops the remainder. Planning hint: avoid mining for all 24 ticks while a zombie is visible.\n"
+    of pvPlain: "Submit one JSON object containing an actions array. The plan executes in order, one primitive per tick, for at most 24 ticks before another request. Taking any damage immediately ends the turn and discards unfinished actions. Avoid a long mining plan while a zombie is visible.\n"
+    of pvNumbered: "1. Send a single JSON object with your actions in order.\n2. Actions execute sequentially, one primitive per tick, with a 24-tick turn limit.\n3. Any incoming hit interrupts the turn and discards the remaining plan.\n4. With a zombie on screen, do not commit to 24 ticks of mining.\n"
+    of pvQuestions: "How much can you plan? Send your actions in one JSON object. How do they run? In sequence, one primitive per tick, until the 24-tick limit and the next request. What if you are hit? The turn ends immediately and the rest is discarded. Should you mine for 24 ticks with a zombie visible? No.\n"
+    of pvReordered: "Any hit interrupts your turn and cancels its remaining actions; avoid 24-tick mining plans with a zombie on screen. Otherwise your ordered plan runs one primitive per tick, for at most 24 ticks before you are asked again. Send your actions in a single JSON object.\n"
+    of pvHeldoutBriefing: "Plan a bounded sequence: a single JSON object holds your actions in order. Execution proceeds in order at one primitive per tick, stopping for a new request after at most 24 ticks. Damage cuts the turn short and throws away unfinished work. A visible zombie makes a 24-tick mining commitment unwise.\n"
+    of pvHeldoutReference: "Submission: one JSON object, actions in execution order. Execution: ordered primitives, one per tick, no more than 24 ticks per turn. Interruption: any hit ends the turn and drops the remainder. Planning hint: avoid mining for all 24 ticks while a zombie is visible.\n"
     of pvMixed: raise newException(ValueError, "mixed selection must resolve to a training wording")
   let scoring = case selection.selectedVariant
     of pvCanonical: CanonicalScoring

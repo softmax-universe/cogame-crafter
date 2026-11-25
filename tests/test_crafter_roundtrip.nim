@@ -166,7 +166,7 @@ suite "public host+player round-trip":
     let dec = parseJson(trajLines[0])
     check dec["action_status"].getStr() == "rejected"
     check dec["executed_action"].kind == JNull
-    check dec["attempts"].len == 2
+    check dec["attempts"].len == 1
     let terminal = parseJson(trajLines[^1])
     check terminal["status"].getStr() == "failed"
     check not terminal["outcome"].hasKey("scores")

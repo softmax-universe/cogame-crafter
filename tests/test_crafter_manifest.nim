@@ -146,9 +146,6 @@ suite "the manifest pins":
                    m["certification"]["game_config"]]:
       let resolved = gameConfigOf(config)
       check resolved.wallClockBudgetSeconds <= 660
-      check resolved.attempt1Ms mod 1000 == 0
-      check resolved.retryMs mod 1000 == 0
-      check resolved.attempt1Ms + resolved.retryMs <= resolved.turnBudgetMs
       check resolved.maxTicks == resolved.maxTurns * resolved.turnTicks
       check resolved.dayFraction < resolved.dayLength
       check resolved.numAgents == 1

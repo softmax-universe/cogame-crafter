@@ -293,33 +293,12 @@
           "maximum": 22,
           "default": 8
         },
-        "maxActionsPerTurn": {
-          "type": "integer",
-          "description": "Reply entries honoured per turn.",
-          "minimum": 1,
-          "maximum": 64,
-          "default": 12
-        },
         "macroPrimitiveCap": {
           "type": "integer",
           "description": "Primitives one macro may expand to.",
           "minimum": 1,
           "maximum": 64,
           "default": 24
-        },
-        "attempt1Ms": {
-          "type": "integer",
-          "description": "Attempt-1 LLM deadline, a whole number of seconds.",
-          "minimum": 1000,
-          "maximum": 60000,
-          "default": 6000
-        },
-        "retryMs": {
-          "type": "integer",
-          "description": "The single retry's deadline, a whole number of seconds.",
-          "minimum": 1000,
-          "maximum": 60000,
-          "default": 3000
         },
         "turnBudgetMs": {
           "type": "integer",
@@ -691,7 +670,6 @@
         "regenTicks": 25,
         "starveTicks": 10,
         "plantRipenTicks": 120,
-        "maxActionsPerTurn": 12,
         "macroPrimitiveCap": 24,
         "dayLength": 192,
         "dayFraction": 128,
@@ -699,8 +677,6 @@
         "maxCows": 12,
         "maxZombies": 8,
         "parAchievements": 8,
-        "attempt1Ms": 6000,
-        "retryMs": 3000,
         "turnBudgetMs": 9500,
         "turnSpacingMs": 2600,
         "wallClockBudgetSeconds": 660,
@@ -734,7 +710,6 @@
         "regenTicks": 25,
         "starveTicks": 10,
         "plantRipenTicks": 120,
-        "maxActionsPerTurn": 12,
         "macroPrimitiveCap": 24,
         "dayLength": 160,
         "dayFraction": 80,
@@ -742,8 +717,6 @@
         "maxCows": 8,
         "maxZombies": 12,
         "parAchievements": 6,
-        "attempt1Ms": 6000,
-        "retryMs": 3000,
         "turnBudgetMs": 9500,
         "turnSpacingMs": 2600,
         "wallClockBudgetSeconds": 660,
@@ -780,7 +753,6 @@
       "regenTicks": 25,
       "starveTicks": 10,
       "plantRipenTicks": 120,
-      "maxActionsPerTurn": 12,
       "macroPrimitiveCap": 24,
       "dayLength": 192,
       "dayFraction": 128,

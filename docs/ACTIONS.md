@@ -16,7 +16,7 @@ silent substitution or fallback moves).
 
 | Field | Type | Cap / domain |
 |---|---|---|
-| `actions` | array | **required**, **<= 12 entries** of action objects. Empty array `[]` = 24 `noop` ticks. Missing, non-array, non-object entries, or > 12 entries are rejected |
+| `actions` | array | **required**, ordered action objects. Empty array `[]` = 24 `noop` ticks. Missing, non-array, non-object entries, or > 12 entries are rejected |
 | `actions[].act` | string | **required**; exact canonical name of one of the **17 primitives** or **2 macros** (`goto`, `move`) |
 | `actions[].x`, `.y` | integer | required iff `act == "goto"`; integer in `0..63`; non-integer, absent, or out-of-bounds values are rejected |
 | `actions[].dir` | string | required iff `act == "move"`; exact canonical direction `up | down | left | right`; anything else is rejected |
@@ -28,7 +28,7 @@ silent substitution or fallback moves).
 
 **Invalid replies are rejected, never rewritten or silently repaired.** Turning
 a malformed `goto` into a `move_down` or substituting a fallback move hides
-model defects, so invalid replies fail validation and trigger the retry/failure
+model defects, so invalid replies fail validation and trigger the failure
 path.
 
 Every string that lands in the replay — `say`, `notes`, the policy label,

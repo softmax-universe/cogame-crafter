@@ -178,11 +178,11 @@ proc placePrefix(sim: SimServer, ok: set[Terrain]): tuple[found: bool,
 
 proc foragerPlan*(sim: SimServer, params = DefaultBaselineParams): Directive =
   ## THE deterministic priority ladder. Every turn the FIRST matching rule
-  ## wins and emits at most `maxActionsPerTurn` actions. `forager` never
+  ## wins and emits at most `turnTicks` actions. `forager` never
   ## routes through lava (lava is not traversable to the BFS) and never sleeps
   ## with an open neighbour it can afford to seal.
   result.source = dsScripted
-  let cap = max(1, sim.config.maxActionsPerTurn)
+  let cap = max(1, sim.config.turnTicks)
   let front = sim.cog.ahead()
 
   template finishTurn(pad: bool): untyped =
@@ -434,7 +434,7 @@ proc wandererPlan*(sim: SimServer,
     x = sim.cog.x
     y = sim.cog.y
     dir = sim.cog.facing
-  let cap = max(1, sim.config.maxActionsPerTurn)
+  let cap = max(1, sim.config.turnTicks)
   while result.actions.len + 2 <= cap:
     if sim.world.at(x + FacingDx[dir], y + FacingDy[dir]) in Standable:
       ## `n = 2` only when BOTH cells are plain ground: the second step of a

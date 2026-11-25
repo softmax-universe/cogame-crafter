@@ -79,7 +79,7 @@ proc extractJsonObject*(text: string): JsonNode =
   if result.kind != JObject:
     raise newException(DirectiveError, "reply is not a JSON object")
 
-proc parseDirective*(payload: JsonNode, maxActionsPerTurn: int): Directive =
+proc parseDirective*(payload: JsonNode): Directive =
   ## Strictly turns one parsed reply object into a legal plan. Raises
   ## DirectiveError on any schema violation, unknown verb, legacy alias,
   ## out-of-range field, or over-cap action list. Genuine optional fields
@@ -99,9 +99,6 @@ proc parseDirective*(payload: JsonNode, maxActionsPerTurn: int): Directive =
     raise newException(DirectiveError,
       "reply must include an \"actions\" array")
   let entries = payload["actions"]
-  if entries.len > maxActionsPerTurn:
-    raise newException(DirectiveError,
-      "too many actions: " & $entries.len & " > " & $maxActionsPerTurn)
   for i in 0 ..< entries.len:
     let entry = entries[i]
     if entry.kind != JObject:

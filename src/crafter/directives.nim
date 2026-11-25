@@ -34,13 +34,22 @@ type
 
   DirectiveError* = object of ValueError
 
+proc replyPreview(text: string, maxRunes = 80): string =
+  ## Single-line rune-safe snippet of a rejected reply for diagnostics.
+  var clean = text.replace("\r", " ").replace("\n", " ").replace("\t", " ").strip()
+  clean.truncateRunes(maxRunes)
+
 proc unwrapSingleCodeFence(text: string): string =
   ## Unwraps at most ONE ordinary outer Markdown code fence (plain ``` or
   ## JSON-tagged ```json, case-insensitive). Rejects unclosed fences,
-  ## non-JSON language tags, or surrounding prose outside the fence.
-  let trimmed = text.strip()
+  ## non-JSON language tags, or content after the final fenced action.
+  var trimmed = text.strip()
+  if trimmed.startsWith("\xEF\xBB\xBF"):
+    trimmed = trimmed[3 .. ^1].strip()
   if not trimmed.startsWith("```"):
-    return trimmed
+    let opening = trimmed.find("\n```")
+    if opening < 0 or trimmed.startsWith("{"): return trimmed
+    trimmed = trimmed[opening + 1 .. ^1]
   let firstNewline = trimmed.find('\n')
   if firstNewline < 0:
     raise newException(DirectiveError, "unclosed markdown code fence")
@@ -68,14 +77,15 @@ proc unwrapSingleCodeFence(text: string): string =
 proc extractJsonObject*(text: string): JsonNode =
   ## Extracts exactly one JSON object from a model reply, either bare or inside
   ## a single ordinary outer Markdown code fence (JSON-tagged or plain).
-  ## Rejects surrounding prose, extra objects, and non-object JSON values.
+  ## An explanation may precede the final fenced action.
   let inner = unwrapSingleCodeFence(text)
   if inner.len == 0:
     raise newException(DirectiveError, "empty reply")
   try:
     result = parseJson(inner)
   except CatchableError as error:
-    raise newException(DirectiveError, "invalid JSON reply: " & error.msg)
+    raise newException(DirectiveError,
+      "invalid JSON reply: " & error.msg & " (got: " & replyPreview(inner) & ")")
   if result.kind != JObject:
     raise newException(DirectiveError, "reply is not a JSON object")
 

@@ -1,14 +1,11 @@
-## The reply schema: what a policy (LLM or scripted) may say, how a reply is
-## parsed TOLERANTLY, and what happens to an entry that does not validate.
+## The reply schema: what a policy (LLM or scripted) may say, and strict
+## validation of a single JSON reply object.
 ##
 ## Both policy kinds emit the SAME object through the SAME validator, which is
 ## what makes the bounded-orders test in `tests/test_crafter_driver.nim`
 ## meaningful.
 ##
-## INVALID ACTIONS ARE DROPPED, NEVER REWRITTEN. Turning a malformed `goto`
-## into a `move_down` could walk the cog into lava on the game's own
-## initiative, so the entry is removed, counted in `repliesRepaired`, and
-## reported back as `dropped` next turn.
+## INVALID REPLIES ARE REJECTED, NEVER REWRITTEN OR SILENTLY REPAIRED.
 ##
 ## RUNE DISCIPLINE. Every cap in this file is measured in RUNES and every
 ## truncation lands on a rune boundary. Slicing a string by BYTE index
@@ -37,131 +34,129 @@ type
 
   DirectiveError* = object of ValueError
 
+proc unwrapSingleCodeFence(text: string): string =
+  ## Unwraps at most ONE ordinary outer Markdown code fence (plain ``` or
+  ## JSON-tagged ```json, case-insensitive). Rejects unclosed fences,
+  ## non-JSON language tags, or surrounding prose outside the fence.
+  let trimmed = text.strip()
+  if not trimmed.startsWith("```"):
+    return trimmed
+  let firstNewline = trimmed.find('\n')
+  if firstNewline < 0:
+    raise newException(DirectiveError, "unclosed markdown code fence")
+  let tag = trimmed[3 ..< firstNewline].strip().toLowerAscii()
+  if tag.len > 0 and tag != "json":
+    raise newException(DirectiveError, "unsupported markdown code fence: " & tag)
+  let body = trimmed[firstNewline + 1 .. ^1]
+  let closeIdx = body.rfind("```")
+  if closeIdx < 0:
+    raise newException(DirectiveError, "unclosed markdown code fence")
+  if body[closeIdx + 3 .. ^1].strip().len > 0:
+    raise newException(DirectiveError, "unexpected text after markdown code fence")
+  let lineStart =
+    if closeIdx == 0: -1
+    else: body.rfind('\n', last = closeIdx - 1)
+  let beforeClose =
+    if closeIdx == 0: ""
+    elif lineStart < 0: body[0 ..< closeIdx]
+    else: body[lineStart + 1 ..< closeIdx]
+  if beforeClose.strip(chars = {' ', '\t', '\r'}).len > 0:
+    raise newException(DirectiveError,
+      "closing markdown code fence must be on its own line")
+  body[0 ..< closeIdx].strip()
+
 proc extractJsonObject*(text: string): JsonNode =
-  ## The outermost balanced `{...}` in a model reply, tolerating markdown
-  ## fences and any prose the model prefixed or suffixed. Falls back to
-  ## first-brace..last-brace when the scan finds no balanced pair, which is
-  ## what recovers a reply whose braces sit inside a quoted string.
-  var
-    depth = 0
-    start = -1
-    inString = false
-    escaped = false
-  for i, ch in text:
-    if inString:
-      if escaped: escaped = false
-      elif ch == '\\': escaped = true
-      elif ch == '"': inString = false
-      continue
-    case ch
-    of '"': inString = true
-    of '{':
-      if depth == 0: start = i
-      inc depth
-    of '}':
-      if depth > 0:
-        dec depth
-        if depth == 0 and start >= 0:
-          try:
-            return parseJson(text[start .. i])
-          except CatchableError:
-            start = -1
-    else: discard
-  let
-    first = text.find('{')
-    last = text.rfind('}')
-  if first < 0 or last <= first:
-    var head = text.strip()
-    if head.runeLen > 160:
-      head = head.truncateRunes(160) & "..."
-    raise newException(
-      DirectiveError, "no JSON object in reply: " & head.replace("\n", " "))
-  parseJson(text[first .. last])
-
-proc readInteger(node: JsonNode): tuple[ok: bool, value: int] =
-  ## One integer field: an int, a whole float, or a numeric string. Anything
-  ## else reports `ok = false` so the caller DROPS the entry rather than
-  ## inventing a destination.
-  if node.isNil:
-    return (false, 0)
-  case node.kind
-  of JInt:
-    (true, int(node.getBiggestInt()))
-  of JFloat:
-    let value = node.getFloat()
-    if value != value or value > 1.0e9 or value < -1.0e9: (false, 0)
-    else: (true, int(value))
-  of JString:
-    try: (true, parseInt(node.getStr().strip()))
-    except ValueError: (false, 0)
-  else:
-    (false, 0)
-
-proc actionEntries(payload: JsonNode): seq[JsonNode] =
-  ## `actions` accepted as an array of objects; a bare string entry (`"do"`)
-  ## is accepted too, because models emit that shape.
-  let node = payload{"actions"}
-  if node.isNil or node.kind != JArray:
-    return @[]
-  for item in node:
-    if item.kind == JObject:
-      result.add(item)
-    elif item.kind == JString:
-      result.add(%*{"act": item.getStr()})
-
-proc verbOf(entry: JsonNode): string =
-  ## `act` is the schema's key; `do` is accepted as an alias because a model
-  ## that has seen the starter's schema emits it.
-  var text = entry{"act"}.getStr()
-  if text.len == 0:
-    let alternative = entry{"do"}
-    if not alternative.isNil and alternative.kind == JString:
-      text = alternative.getStr()
-  text.truncateRunes(20)
+  ## Extracts exactly one JSON object from a model reply, either bare or inside
+  ## a single ordinary outer Markdown code fence (JSON-tagged or plain).
+  ## Rejects surrounding prose, extra objects, and non-object JSON values.
+  let inner = unwrapSingleCodeFence(text)
+  if inner.len == 0:
+    raise newException(DirectiveError, "empty reply")
+  try:
+    result = parseJson(inner)
+  except CatchableError as error:
+    raise newException(DirectiveError, "invalid JSON reply: " & error.msg)
+  if result.kind != JObject:
+    raise newException(DirectiveError, "reply is not a JSON object")
 
 proc parseDirective*(payload: JsonNode, maxActionsPerTurn: int): Directive =
-  ## Turns one parsed reply into a legal plan. Raises DirectiveError only when
-  ## the payload is not a JSON object — a reply with a valid `say` but no
-  ## `actions` is USABLE (the turn is spent idling and the narration is
-  ## delivered), which is the one condition the retry and the scripted
-  ## fallback do NOT exist for.
+  ## Strictly turns one parsed reply object into a legal plan. Raises
+  ## DirectiveError on any schema violation, unknown verb, legacy alias,
+  ## out-of-range field, or over-cap action list. Genuine optional fields
+  ## (`say`, `notes`, and `n` on repeatable actions) keep their defaults.
   if payload.isNil or payload.kind != JObject:
     raise newException(DirectiveError, "reply is not a JSON object")
   result.source = dsLlm
-  result.say = sanitizeSay(payload{"say"}.getStr())
-  result.notes = sanitizeNote(payload{"notes"}.getStr())
-  var seen = 0
-  for entry in payload.actionEntries():
-    inc seen
-    if seen > maxActionsPerTurn:
-      inc result.overCap
-      continue
-    let parsed = parseActionKind(entry.verbOf())
+  if payload.hasKey("say") and payload["say"].kind != JNull:
+    if payload["say"].kind != JString:
+      raise newException(DirectiveError, "field \"say\" must be a string")
+    result.say = sanitizeSay(payload["say"].getStr())
+  if payload.hasKey("notes") and payload["notes"].kind != JNull:
+    if payload["notes"].kind != JString:
+      raise newException(DirectiveError, "field \"notes\" must be a string")
+    result.notes = sanitizeNote(payload["notes"].getStr())
+  if not payload.hasKey("actions") or payload["actions"].kind != JArray:
+    raise newException(DirectiveError,
+      "reply must include an \"actions\" array")
+  let entries = payload["actions"]
+  if entries.len > maxActionsPerTurn:
+    raise newException(DirectiveError,
+      "too many actions: " & $entries.len & " > " & $maxActionsPerTurn)
+  for i in 0 ..< entries.len:
+    let entry = entries[i]
+    if entry.kind != JObject:
+      raise newException(DirectiveError,
+        "actions[" & $i & "] must be a JSON object")
+    if not entry.hasKey("act") or entry["act"].kind != JString:
+      raise newException(DirectiveError,
+        "actions[" & $i & "] must include string field \"act\"")
+    let actName = entry["act"].getStr()
+    let parsed = parseActionKind(actName)
     if not parsed.ok:
-      inc result.dropped
-      continue
+      raise newException(DirectiveError,
+        "actions[" & $i & "] unknown action: " & actName.truncateRunes(32))
     var action = Action(kind: parsed.kind, n: 1)
     case parsed.kind
     of akGoto:
+      if not entry.hasKey("x") or entry["x"].kind != JInt or
+          not entry.hasKey("y") or entry["y"].kind != JInt:
+        raise newException(DirectiveError,
+          "actions[" & $i & "] goto requires integer \"x\" and \"y\"")
       let
-        gx = readInteger(entry{"x"})
-        gy = readInteger(entry{"y"})
-      if not gx.ok or not gy.ok:
-        inc result.dropped
-        continue
-      action.x = clamp(gx.value, 0, WorldSize - 1)
-      action.y = clamp(gy.value, 0, WorldSize - 1)
+        gx = entry["x"].getBiggestInt()
+        gy = entry["y"].getBiggestInt()
+      if gx < 0 or gx >= WorldSize or gy < 0 or gy >= WorldSize:
+        raise newException(DirectiveError,
+          "actions[" & $i & "] goto coordinates out of bounds: (" &
+          $gx & "," & $gy & ")")
+      action.x = int(gx)
+      action.y = int(gy)
     of akMove:
-      let dir = parseFacing(entry{"dir"}.getStr().truncateRunes(5))
+      if not entry.hasKey("dir") or entry["dir"].kind != JString:
+        raise newException(DirectiveError,
+          "actions[" & $i & "] move requires string \"dir\"")
+      let dirName = entry["dir"].getStr()
+      let dir = parseFacing(dirName)
       if not dir.ok:
-        inc result.dropped
-        continue
+        raise newException(DirectiveError,
+          "actions[" & $i & "] invalid move dir: " & dirName.truncateRunes(16))
       action.dir = dir.dir
     else: discard
     let repeat = repeatable(parsed.kind)
-    if repeat.ok:
-      let count = readInteger(entry{"n"})
-      action.n = if count.ok: clamp(count.value, 1, repeat.limit) else: 1
+    if entry.hasKey("n") and entry["n"].kind != JNull:
+      if not repeat.ok:
+        raise newException(DirectiveError,
+          "actions[" & $i & "] action \"" & $parsed.kind &
+          "\" does not accept \"n\"")
+      if entry["n"].kind != JInt:
+        raise newException(DirectiveError,
+          "actions[" & $i & "] \"n\" must be an integer")
+      let count = entry["n"].getBiggestInt()
+      if count < 1 or count > repeat.limit:
+        raise newException(DirectiveError,
+          "actions[" & $i & "] \"n\" out of range 1.." & $repeat.limit &
+          ": " & $count)
+      action.n = int(count)
     result.actions.add(action)
 
 proc actionsJson*(actions: seq[Action]): JsonNode =

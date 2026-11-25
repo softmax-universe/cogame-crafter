@@ -639,7 +639,7 @@
       "id": "forager",
       "type": "player",
       "name": "forager",
-      "description": "The published scripted baseline: a deterministic priority ladder that drinks, eats, shelters at night and climbs the tech tree. It is also the server-side fallback whenever a seat's LLM call fails twice, so every turn always has a legal plan.",
+      "description": "The published scripted baseline: a deterministic priority ladder that drinks, eats, shelters at night and climbs the tech tree.",
       "image": "{{CRAFTER_IMAGE}}",
       "run": [
         "/bin/crafter-player"

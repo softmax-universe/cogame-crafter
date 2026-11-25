@@ -147,61 +147,106 @@ suite "the scripted baselines are bounded and legal":
     sim.stepTick()
     check sim.executed == @[pNoop]
 
-  test "the fallback IS the forager proc":
-    ## Item 22: the decision engine's fallback path and the `forager` baseline
-    ## resolve to the same proc, so they cannot drift.
-    for sim in states[0 .. 39]:
-      let fallback = foragerFallback(sim)
-      let baseline = scriptedPlan(sim, blForager)
-      check fallback.actions == baseline.actions
-      check fallback.source == dsFallback
-      check baseline.source == dsScripted
+  test "parseBaseline accepts only canonical scripted names":
+    check tryParseBaseline("forager") == (true, blForager)
+    check tryParseBaseline("wanderer") == (true, blWanderer)
+    check not tryParseBaseline("wander").ok
+    check not tryParseBaseline("unknown").ok
+    expect ValueError:
+      discard parseBaseline("wander")
 
 suite "reply validation":
-  test "the validator accepts the schema and drops what does not validate":
-    ## Item 23.
+  test "the validator accepts canonical replies and optional defaults":
     let payload = parseJson("""{"actions":[
       {"act":"goto","x":35,"y":25},
       {"act":"do","n":4},
+      {"act":"do"},
       {"act":"make_stone_sword"},
-      {"act":"MOVE-UP"},
-      {"act":"move","dir":"N","n":99},
-      {"act":"sleep","n":40},
-      {"act":"goto","y":3},
-      {"act":"move","dir":"sideways"},
-      {"act":"teleport"},
-      {"act":"goto","x":-4,"y":900}],
+      {"act":"move_up"},
+      {"act":"move","dir":"up","n":12},
+      {"act":"move","dir":"left"},
+      {"act":"sleep","n":24}],
       "say":"planning","notes":"scratch"}""")
     let directive = parseDirective(payload, 12)
-    ## Dropped, never rewritten: the bad goto, the bad dir and the unknown verb.
-    check directive.dropped == 3
+    check directive.dropped == 0
+    check directive.overCap == 0
     let kinds = block:
       var names: seq[string]
       for action in directive.actions:
         names.add($action.kind)
       names
-    check kinds == @["goto", "do", "make_stone_sword", "move_up", "move",
-                     "sleep", "goto"]
-    ## `n` is clamped into its range; `goto` coordinates are clamped to 0..63.
+    check kinds == @["goto", "do", "do", "make_stone_sword", "move_up",
+                     "move", "move", "sleep"]
     check directive.actions[1].n == 4
-    check directive.actions[4].n == 12          ## move caps at 12
-    check directive.actions[4].dir == fUp       ## "N" case-folds to up
-    check directive.actions[5].n == 24          ## sleep caps at 24
-    check directive.actions[6].x == 0
-    check directive.actions[6].y == WorldSize - 1
+    check directive.actions[2].n == 1
+    check directive.actions[5].n == 12
+    check directive.actions[5].dir == fUp
+    check directive.actions[6].n == 1
+    check directive.actions[6].dir == fLeft
+    check directive.actions[7].n == 24
+    ## Empty actions array with optional say/notes omitted is valid.
+    let idle = parseDirective(parseJson("""{"actions":[]}"""), 12)
+    check idle.actions.len == 0
+    check idle.say == ""
+    check idle.notes == ""
 
-  test "a say-only reply is usable; a non-object is not":
-    var directive = parseDirective(parseJson("""{"say":"thinking"}"""), 12)
-    check directive.actions.len == 0
-    check directive.say == "thinking"
+  test "extractJsonObject accepts bare or single outer fence and rejects prose or extra objects":
+    let bare = extractJsonObject("""  {"actions":[{"act":"noop"}]}  """)
+    check bare["actions"].len == 1
+    let jsonFence = extractJsonObject(
+      "```json\n{\"actions\":[{\"act\":\"do\"}]}\n```")
+    check jsonFence["actions"].len == 1
+    let plainFence = extractJsonObject(
+      "```\n{\"actions\":[{\"act\":\"sleep\",\"n\":2}]}\n```")
+    check plainFence["actions"].len == 1
+    for bad in [
+      "no braces at all",
+      "[]",
+      "here you go:\n```json\n{\"actions\":[]}\n```\nok",
+      "Sure! {\"actions\":[]}",
+      "{\"actions\":[]} thanks",
+      "{\"actions\":[]} {\"actions\":[{\"act\":\"do\"}]}",
+      "```json\n{\"actions\":[]}\n```\n```json\n{\"actions\":[]}\n```",
+      "```json\n{\"actions\":[]}\n{\"actions\":[]}\n```",
+      "```python\n{\"actions\":[]}\n```",
+      "```json\n{\"actions\":[]}"
+    ]:
+      expect DirectiveError:
+        discard extractJsonObject(bad)
+
+  test "strict parseDirective rejects shims, aliases, out-of-range fields, and over-cap lists":
+    for bad in [
+      "[]",
+      """{"say":"thinking"}""",
+      """{"actions":"do"}""",
+      """{"actions":["do"]}""",
+      """{"actions":[{"do":"do"}]}""",
+      """{"actions":[{"act":"MOVE-UP"}]}""",
+      """{"actions":[{"act":"move","dir":"N","n":4}]}""",
+      """{"actions":[{"act":"move","dir":"north"}]}""",
+      """{"actions":[{"act":"move","dir":"UP"}]}""",
+      """{"actions":[{"act":"move","dir":"sideways"}]}""",
+      """{"actions":[{"act":"move","dir":"up","n":13}]}""",
+      """{"actions":[{"act":"move","dir":"up","n":0}]}""",
+      """{"actions":[{"act":"move","dir":"up","n":"4"}]}""",
+      """{"actions":[{"act":"sleep","n":25}]}""",
+      """{"actions":[{"act":"noop","n":2}]}""",
+      """{"actions":[{"act":"goto","y":3}]}""",
+      """{"actions":[{"act":"goto","x":"3","y":4}]}""",
+      """{"actions":[{"act":"goto","x":3.5,"y":4}]}""",
+      """{"actions":[{"act":"goto","x":-1,"y":4}]}""",
+      """{"actions":[{"act":"goto","x":4,"y":64}]}""",
+      """{"actions":[{"act":"teleport"}]}""",
+      """{"actions":[],"say":123}""",
+      """{"actions":[],"notes":["x"]}"""
+    ]:
+      expect DirectiveError:
+        discard parseDirective(parseJson(bad), 12)
+    var overCap = newJArray()
+    for i in 0 .. 12:
+      overCap.add(%*{"act": "do"})
     expect DirectiveError:
-      discard parseDirective(parseJson("[]"), 12)
-    expect DirectiveError:
-      discard extractJsonObject("no braces at all")
-    ## Fence-tolerant, prose-tolerant extraction.
-    let fenced = extractJsonObject(
-      "here you go:\n```json\n{\"say\":\"x\"}\n```\nok")
-    check fenced{"say"}.getStr() == "x"
+      discard parseDirective(%*{"actions": overCap}, 12)
 
   test "say and notes truncate on RUNE boundaries with 4-byte emoji on the cap":
     ## Item 23's rune clause. A byte slice would cut a codepoint in half and
@@ -213,21 +258,12 @@ suite "reply validation":
     var notes = ""
     for i in 0 ..< MaxNoteRunes + 40:
       notes.add(emoji)
-    let directive = parseDirective(%*{"say": say, "notes": notes}, 12)
+    let directive = parseDirective(%*{"actions": [], "say": say, "notes": notes}, 12)
     check directive.say.runeLen == MaxSayRunes
     check directive.notes.runeLen == MaxNoteRunes
     check directive.say.len == MaxSayRunes * 4  ## whole codepoints, every one
     check directive.notes.validateUtf8() == -1
     check directive.say.validateUtf8() == -1
-
-  test "actions cap at 12 and the surplus is counted, not dropped silently":
-    var entries = newJArray()
-    for i in 0 .. 19:
-      entries.add(%*{"act": "do"})
-    let directive = parseDirective(%*{"actions": entries}, 12)
-    check directive.actions.len == 12
-    check directive.overCap == 8
-    check directive.dropped == 0
 
   test "truncated, dropped, unreachable and interrupted are reported back":
     var sim = startedSim(testConfig())

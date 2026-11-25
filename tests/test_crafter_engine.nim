@@ -2,7 +2,7 @@
 ## the six results identities of §Server.
 
 import std/[json, sets, strutils, unittest]
-import crafter/[sim, driver, directives, baselines, decide, events, prompts]
+import crafter/[sim, driver, directives, baselines, decide, events, prompts, llm]
 import helpers
 
 proc episode(variant = "standard", seed = 42): SimServer =
@@ -153,30 +153,33 @@ suite "an episode end to end":
       keys.incl(key)
     check keys == ["message", "failed_policy_index"].toHashSet()
 
-  test "a seat that connects and never answers falls back every turn":
+  test "an LLM seat without credentials fails cleanly without fallback moves":
     ## Item 28, second half: the LLM client with no credentials is `disabled`,
-    ## so every turn falls back INSTANTLY with no network wait.
+    ## so the turn fails immediately with `no_credentials` and inserts no
+    ## fallback move.
     var sim = startedSim(testConfig())
     var engine = initDecisionEngine(sim, PromptSelection())
+    engine.client.disabled = true
+    engine.client.transport = ltNone
     engine.seats[0].isLlm = true
     engine.seats[0].registered = true
-    var fallbacks = 0
-    for turn in 1 .. 6:
-      if not sim.beginTurn(): break
-      let decision = engine.turn(sim, turn, 0)
-      check decision.directive.source == dsFallback
-      for record in decision.records:
-        if parseJson(record){"k"}.getStr() == "fallback":
-          inc fallbacks
-          check parseJson(record){"cause"}.getStr() == "no_credentials"
-      discard sim.applyDirective(decision.directive, nil)
-      while sim.turnActive and sim.phase == Playing:
-        sim.stepTick()
-        sim.pending.setLen(0)
-    check fallbacks >= 6
-    check sim.fallbackTurns >= 6
+    check sim.beginTurn()
+    let decision = engine.turn(sim, 1, 0)
+    check not decision.ok
+    check decision.failureCause == "no_credentials"
+    check decision.directive.actions.len == 0
+    var recorded = false
+    for record in decision.records:
+      if parseJson(record){"k"}.getStr() == "fallback":
+        recorded = true
+        check parseJson(record){"cause"}.getStr() == "no_credentials"
+    check recorded
+    sim.deadSeats[0] = true
+    sim.applyStop(edFault, decision.failureCause & ": " & decision.failureDetail)
+    check sim.endReason == erFault
+    check sim.endRule == edFault
 
-  test "the budget guard settles the episode complete, not deadline":
+  test "the budget guard stops LLM turns cleanly without fallback moves":
     ## Item 29.
     var sim = startedSim(testConfig())
     var engine = initDecisionEngine(sim, PromptSelection())
@@ -191,10 +194,11 @@ suite "an episode end to end":
         named = true
         check node{"turn"}.getInt() == 1
     check named
-    check decision.directive.source == dsFallback
-    ## The episode still finishes `complete`.
-    sim.finish(erComplete, edTurnCap)
-    check sim.endReason == erComplete
+    check not decision.ok
+    check decision.failureCause in ["no_credentials", "budget_guard"]
+    sim.applyStop(edWallClock, "budget_guard")
+    check sim.endReason == erDeadline
+    check sim.endRule == edWallClock
 
   test "the rate guard skips the call and names the cause":
     var sim = startedSim(testConfig())
@@ -203,16 +207,8 @@ suite "an episode end to end":
     for i in 0 ..< RateGuardMaxRequests:
       engine.noteRequest()
     let decision = engine.turn(sim, 2, 0)
-    check decision.directive.source == dsFallback
-    var cause = ""
-    for record in decision.records:
-      let node = parseJson(record)
-      if node{"k"}.getStr() == "fallback":
-        cause = node{"cause"}.getStr()
-    ## With no credentials the engine reports `no_credentials` first, which is
-    ## the honest cause; with credentials it would be `rate_guard`. Either way
-    ## the turn NEVER waits on the network.
-    check cause in ["no_credentials", "rate_guard"]
+    check not decision.ok
+    check decision.failureCause in ["no_credentials", "rate_guard"]
 
   test "flinch accounting":
     ## Item 30.

@@ -308,12 +308,16 @@ proc parseRegistration*(text: string): tuple[ok: bool, isLlm: bool,
   if not (node.hasKey("policy") or node.hasKey("prompt") or
           node.hasKey("scripted")):
     return
-  result.ok = true
   result.label = node{"policy"}.getStr().truncateRunes(MaxPolicyLabelRunes)
   result.prompt = node{"prompt"}.getStr().truncateRunes(MaxPromptRunes)
   let scripted = node{"scripted"}
   if not scripted.isNil and scripted.kind == JString:
-    result.scripted = scripted.getStr()
+    let name = scripted.getStr().strip()
+    if name.len > 0:
+      if not tryParseBaseline(name).ok:
+        return
+      result.scripted = name
+  result.ok = true
   result.isLlm = result.prompt.strip().len > 0 and result.scripted.len == 0
 
 proc broadcastPacket(packet: seq[uint8], websocket: WebSocket) =
@@ -512,13 +516,12 @@ proc runServerLoop*() =
           sim.applyStop(edFault, "seat joined but never registered")
           break
         if wasLobby and sim.phase == Playing and joinedSlots.len == 0:
-          ## A seat that never connects does NOT end the episode: the run
-          ## plays out to its natural end driven by `forager`, with the seat
-          ## marked dead and ONE closed-schema failure payload reported.
-          echo "crafter: no seat connected inside the lobby window; the ",
-            "run plays out on the forager baseline"
+          echo "crafter: no seat connected inside the lobby window; ",
+            "refusing to substitute a scripted baseline"
           declarePlayerFailure(0, "seat never connected")
           sim.deadSeats[0] = true
+          sim.applyStop(edFault, "seat never connected")
+          break
         ## THE LOBBY ALWAYS PACES IN WALL CLOCK, fastMode or not: it is a wait
         ## for a container to dial in, not a simulation. Without this the
         ## whole episode completes in milliseconds before the player process
@@ -542,6 +545,23 @@ proc runServerLoop*() =
         let decision = engine.turn(sim, turnIndex, elapsedSeconds())
         for record in decision.records:
           writeChat(record)
+        if not decision.ok:
+          let detail =
+            if decision.failureDetail.len > 0:
+              decision.failureCause & ": " & decision.failureDetail
+            else:
+              decision.failureCause
+          echo "crafter: seat 0 failed on turn ", turnIndex, " (", detail, ")"
+          engine.trajectory.recordRejectedDecision(turnIndex,
+            privateObservation, selection, engine.seats[0].prompt,
+            engine.nativeAttempts)
+          if decision.failureCause == "budget_guard":
+            sim.applyStop(edWallClock, detail)
+          else:
+            sim.deadSeats[0] = true
+            declarePlayerFailure(0, detail)
+            sim.applyStop(edFault, detail)
+          break
         let record = sim.applyDirective(decision.directive, observation)
         engine.trajectory.recordAppliedDecision(turnIndex, privateObservation,
           selection, engine.seats[0].prompt, sim, decision.directive, record,

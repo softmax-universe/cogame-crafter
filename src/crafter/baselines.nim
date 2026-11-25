@@ -56,13 +56,22 @@ const
   Buildable = {tGrass, tSand, tPath}
   Placeable = {tGrass, tSand, tPath, tWater, tLava}
 
+proc tryParseBaseline*(text: string): tuple[ok: bool, baseline: Baseline] =
+  ## Exact PLAYER_SCRIPTED values: `forager` or `wanderer`.
+  case text.strip()
+  of "forager": (true, blForager)
+  of "wanderer": (true, blWanderer)
+  else: (false, blForager)
+
 proc parseBaseline*(text: string): Baseline =
-  ## PLAYER_SCRIPTED values. Anything unrecognised is `forager`: a seat that
-  ## says nothing useful still plays the published default rather than sitting
-  ## out.
-  case text.strip().toLowerAscii()
-  of "wanderer", "wander": blWanderer
-  else: blForager
+  ## Parses an explicit PLAYER_SCRIPTED value or defaults empty to `forager`.
+  let key = text.strip()
+  if key.len == 0:
+    return blForager
+  let parsed = tryParseBaseline(key)
+  if not parsed.ok:
+    raise newException(ValueError, "unknown scripted baseline: " & key)
+  parsed.baseline
 
 proc nearestThreat(sim: SimServer, kinds: set[CreatureKind]):
     tuple[found: bool; x, y, d: int] =

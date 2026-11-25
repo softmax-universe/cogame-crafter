@@ -309,18 +309,17 @@ proc moveFacing*(primitive: Primitive): tuple[ok: bool, dir: Facing] =
   else: (false, fUp)
 
 proc parseFacing*(text: string): tuple[ok: bool, dir: Facing] =
-  ## Case-insensitive, accepting the word, the initial and the compass letter.
-  case text.strip().toLowerAscii()
-  of "up", "u", "n", "north": (true, fUp)
-  of "down", "d", "s", "south": (true, fDown)
-  of "left", "l", "w", "west": (true, fLeft)
-  of "right", "r", "e", "east": (true, fRight)
+  ## Exact canonical facing names only.
+  case text
+  of "up": (true, fUp)
+  of "down": (true, fDown)
+  of "left": (true, fLeft)
+  of "right": (true, fRight)
   else: (false, fUp)
 
 proc parsePrimitive*(text: string): tuple[ok: bool, primitive: Primitive] =
-  ## Lower-cased and `-` -> `_` normalised before matching.
-  let key = text.strip().toLowerAscii().replace("-", "_")
+  ## Exact canonical primitive names only.
   for primitive in Primitive:
-    if $primitive == key:
+    if $primitive == text:
       return (true, primitive)
   (false, pNoop)

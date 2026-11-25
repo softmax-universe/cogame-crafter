@@ -220,8 +220,10 @@ proc textOf*(
   for contentBlock in payload["content"]:
     if contentBlock{"type"}.getStr() == "text":
       result.add(contentBlock{"text"}.getStr())
-  ## Re-prefix the prefill, unless the provider echoed it back.
-  if not result.strip().startsWith(ReplyPrefill):
+  ## Re-prefix the prefill, unless the provider echoed it back or returned a
+  ## Markdown code fence.
+  let trimmed = result.strip()
+  if not trimmed.startsWith(ReplyPrefill) and not trimmed.startsWith("```"):
     result = ReplyPrefill & result
   if result.len > MaxReplyBytes:
     result = result.truncateRunes(MaxReplyBytes)
@@ -302,8 +304,9 @@ tie-break. A cog that hides in a hole all episode scores almost nothing.
 
 const ReplyRules = """
 REPLY FORMAT
-Reply with ONE JSON object and NOTHING else. Your reply MUST begin with the
-character { and end with }. No prose, no markdown, no code fences.
+Reply with ONE JSON object and NOTHING else (bare JSON or a single markdown
+code fence). No surrounding prose or extra objects. Use exact canonical action
+names, dir in "up"|"down"|"left"|"right", x/y in 0..63, and optional say/notes.
 {"actions":[{"act":"goto","x":35,"y":25},{"act":"do","n":4}],"say":"<=160 chars","notes":"<=400 chars"}
 """
 

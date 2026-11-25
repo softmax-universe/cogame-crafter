@@ -1,9 +1,10 @@
 # Actions and the reply format
 
-Reply with **one JSON object and nothing else**. Your reply MUST begin with `{`
-and end with `}` — no prose, no markdown, no code fences. A reply that is not a
-JSON object is a parse failure; a reply with a valid `say` and no `actions` is
-**usable** (the turn is spent idling and the narration is delivered).
+Reply with **one JSON object and nothing else**, either bare JSON or inside a
+single ordinary outer Markdown code fence (` ```json ` or ` ``` `). Surrounding
+prose, multiple objects, non-object JSON, legacy field aliases, and invalid
+actions are **rejected** (retried once, then surfaced as a player failure — no
+silent substitution or fallback moves).
 
 ```json
 {"actions": [{"act": "goto", "x": 35, "y": 25},
@@ -15,19 +16,20 @@ JSON object is a parse failure; a reply with a valid `say` and no `actions` is
 
 | Field | Type | Cap / domain |
 |---|---|---|
-| `actions` | array | **<= 12 entries**. Entries past the cap are dropped and counted in `actionsDropped`. Absent or empty = 24 `noop` ticks, and the reply is still usable |
-| `actions[].act` | string | **<= 20 runes**; the **17 primitives** by name plus the **2 macros** `goto` and `move`, lower-cased and `-` -> `_` normalised before matching |
-| `actions[].x`, `.y` | integer | required iff `act == "goto"`; **clamped to 0..63**; a non-integer or absent value **drops the entry** and counts in `repliesRepaired` |
-| `actions[].dir` | string | required iff `act == "move"`; **<= 5 runes**; matched case-insensitively against `up down left right u d l r n s w e`; anything else drops the entry |
-| `actions[].n` | integer | honoured **only** on `move` (1..12), `do` (1..12) and `sleep` (1..24); clamped into range; absent = 1; ignored on every other verb |
-| `say` | string | **<= 160 runes** — the cog thinking out loud; drawn in the spectator feed and in the replay, never fed back to the seat |
-| `notes` | string | **<= 400 runes** — private scratchpad, echoed to this seat only next turn |
+| `actions` | array | **required**, **<= 12 entries** of action objects. Empty array `[]` = 24 `noop` ticks. Missing, non-array, non-object entries, or > 12 entries are rejected |
+| `actions[].act` | string | **required**; exact canonical name of one of the **17 primitives** or **2 macros** (`goto`, `move`) |
+| `actions[].x`, `.y` | integer | required iff `act == "goto"`; integer in `0..63`; non-integer, absent, or out-of-bounds values are rejected |
+| `actions[].dir` | string | required iff `act == "move"`; exact canonical direction `up | down | left | right`; anything else is rejected |
+| `actions[].n` | integer | optional on `move` (`1..12`), `do` (`1..12`), and `sleep` (`1..24`), defaulting to `1`; non-integer, out-of-range, or use on any other verb is rejected |
+| `say` | string | optional, **<= 160 runes** — the cog thinking out loud; drawn in the spectator feed and in the replay, never fed back to the seat |
+| `notes` | string | optional, **<= 400 runes** — private scratchpad, echoed to this seat only next turn |
 | whole reply | bytes | **<= 4096** read from the provider before parsing |
 | `PLAYER_PROMPT` | string | **<= 4000 runes** at registration |
 
-**Invalid actions are dropped, never rewritten.** Turning a malformed `goto`
-into a `move_down` could walk the cog into lava on the game's own initiative, so
-the entry is removed, counted, and reported back as `dropped` next turn.
+**Invalid replies are rejected, never rewritten or silently repaired.** Turning
+a malformed `goto` into a `move_down` or substituting a fallback move hides
+model defects, so invalid replies fail validation and trigger the retry/failure
+path.
 
 Every string that lands in the replay — `say`, `notes`, the policy label,
 `stopDetail`, recorded error text — is truncated on **rune boundaries**, never

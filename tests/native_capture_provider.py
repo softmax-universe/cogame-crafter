@@ -16,11 +16,13 @@ class Provider(BaseHTTPRequestHandler):
         assert self.headers["X-Coworld-Player-Slot"] == "0"
         assert [m["role"] for m in request["messages"]] == ["user"]
         Provider.calls += 1
-        if MODE == "provider_error":
+        if MODE in ("provider_error", "provider_503"):
+            status = 503 if MODE == "provider_503" else 500
+            err_type = "overloaded_error" if status == 503 else "api_error"
             body = json.dumps(
-                {"type": "error", "error": {"type": "api_error", "message": "upstream 500"}}
+                {"type": "error", "error": {"type": err_type, "message": f"upstream {status}"}}
             ).encode()
-            self.send_response(500)
+            self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.send_header(

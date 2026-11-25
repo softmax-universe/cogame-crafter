@@ -276,16 +276,19 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
 proc serverThreadProc(args: ServerThreadArgs) {.thread.} =
   args.server[].serve(Port(args.port), args.address)
 
-proc declarePlayerFailure(slot: int, message: string) =
-  ## The platform's CLOSED payload — exactly `{"message",
-  ## "failed_policy_index"}`, nothing else.
+proc declarePlayerFailure(slot: int, message: string, kind = "player_error") =
+  ## The platform's CLOSED payload — `{"message", "failed_policy_index",
+  ## "kind"}`, nothing else.
   let uri = getEnv("COGAME_PLAYER_FAILURE_URI")
   if uri.len == 0:
     return
+  let trimmed = message.strip().truncateRunes(MaxStopDetailRunes)
+  let detail = if trimmed.len > 0: trimmed else: kind
   try:
     writeCogameUri(uri,
-      $(%*{"message": message.truncateRunes(MaxStopDetailRunes),
-           "failed_policy_index": slot}),
+      $(%*{"message": detail,
+           "failed_policy_index": slot,
+           "kind": kind}),
       "application/json", "COGAME_PLAYER_FAILURE_URI")
   except CatchableError as error:
     echo "crafter: failed to declare player failure: ", error.msg
@@ -551,13 +554,19 @@ proc runServerLoop*() =
               decision.failureCause & ": " & decision.failureDetail
             else:
               decision.failureCause
-          echo "crafter: seat 0 failed on turn ", turnIndex, " (", detail, ")"
+          let failingSeat = decision.seat
+          echo "crafter: seat ", failingSeat, " failed on turn ", turnIndex,
+            " (", detail, ")"
           engine.trajectory.recordRejectedDecision(turnIndex,
-            privateObservation, selection, engine.seats[0].prompt,
+            privateObservation, selection, engine.seats[failingSeat].prompt,
             engine.nativeAttempts)
-          if isPlayerDefect(decision.failureCause):
-            sim.deadSeats[0] = true
-            declarePlayerFailure(0, detail)
+          let failureKind =
+            if isPlayerDefect(decision.failureCause):
+              sim.deadSeats[failingSeat] = true
+              "player_error"
+            else:
+              "episode_inconclusive"
+          declarePlayerFailure(failingSeat, detail, failureKind)
           sim.applyStop(edFault, detail)
           break
         let record = sim.applyDirective(decision.directive, observation)

@@ -147,12 +147,14 @@ suite "an episode end to end":
     let results = parseJson(sim.runResultsJson())
     check results["deadSeats"][0].getBool()
     check results["policyKinds"][0].getStr() == "scripted"
-    ## The platform's CLOSED failure payload — exactly two keys.
-    let payload = %*{"message": "seat never connected", "failed_policy_index": 0}
+    ## The platform's CLOSED failure payload — message, failed_policy_index, kind.
+    let payload = %*{"message": "seat never connected",
+                     "failed_policy_index": 0,
+                     "kind": "player_error"}
     var keys: HashSet[string]
     for key, _ in payload:
       keys.incl(key)
-    check keys == ["message", "failed_policy_index"].toHashSet()
+    check keys == ["message", "failed_policy_index", "kind"].toHashSet()
 
   test "an LLM seat without credentials fails cleanly without fallback moves":
     ## Item 28, second half: the LLM client with no credentials is `disabled`,

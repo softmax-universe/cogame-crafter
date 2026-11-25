@@ -121,7 +121,7 @@ suite "replay":
                 "dayFraction", "mountainThreshold", "maxCows", "maxZombies",
                 "maxSkeletons", "foodTicks", "drinkTicks", "energyTicks",
                 "regenTicks", "starveTicks", "plantRipenTicks",
-                "parAchievements", "maxActionsPerTurn", "macroPrimitiveCap",
+                "parAchievements", "macroPrimitiveCap",
                 "players", "slots", "fastMode"]:
       check config.hasKey(key)
     ## `tokens` is deliberately absent — a replay is a public artifact.

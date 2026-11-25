@@ -221,7 +221,7 @@ STAYING ALIVE
 WHAT YOU SEND
 """
 
-const CanonicalPlanning = """One JSON object with up to 12 actions. They run one per tick, in order, up to 24
+const CanonicalPlanning = """One JSON object with your actions in order. They run one per tick, in order, up to 24
 ticks, then you are asked again. ANY hit you take ENDS YOUR TURN EARLY and
 throws away the rest of your plan - so do not plan 24 ticks of mining with a
 zombie on screen.
@@ -267,12 +267,12 @@ proc systemPrompt*(selection: PromptSelection): string =
     of pvMixed: raise newException(ValueError, "mixed selection must resolve to a training wording")
   let planning = case selection.selectedVariant
     of pvCanonical: CanonicalPlanning
-    of pvPlain: "Submit one JSON object containing at most 12 actions. The plan executes in order, one primitive per tick, for at most 24 ticks before another request. Taking any damage immediately ends the turn and discards unfinished actions. Avoid a long mining plan while a zombie is visible.\n"
-    of pvNumbered: "1. Send a single JSON object with no more than 12 actions.\n2. Actions execute sequentially, one primitive per tick, with a 24-tick turn limit.\n3. Any incoming hit interrupts the turn and discards the remaining plan.\n4. With a zombie on screen, do not commit to 24 ticks of mining.\n"
-    of pvQuestions: "How much can you plan? Up to 12 actions in one JSON object. How do they run? In sequence, one primitive per tick, until the 24-tick limit and the next request. What if you are hit? The turn ends immediately and the rest is discarded. Should you mine for 24 ticks with a zombie visible? No.\n"
-    of pvReordered: "Any hit interrupts your turn and cancels its remaining actions; avoid 24-tick mining plans with a zombie on screen. Otherwise your ordered plan runs one primitive per tick, for at most 24 ticks before you are asked again. Send at most 12 actions in a single JSON object.\n"
-    of pvHeldoutBriefing: "Plan a bounded sequence: a single JSON object may hold up to 12 actions. Execution proceeds in order at one primitive per tick, stopping for a new request after at most 24 ticks. Damage cuts the turn short and throws away unfinished work. A visible zombie makes a 24-tick mining commitment unwise.\n"
-    of pvHeldoutReference: "Submission: one JSON object, at most 12 actions. Execution: ordered primitives, one per tick, no more than 24 ticks per turn. Interruption: any hit ends the turn and drops the remainder. Planning hint: avoid mining for all 24 ticks while a zombie is visible.\n"
+    of pvPlain: "Submit one JSON object containing an actions array. The plan executes in order, one primitive per tick, for at most 24 ticks before another request. Taking any damage immediately ends the turn and discards unfinished actions. Avoid a long mining plan while a zombie is visible.\n"
+    of pvNumbered: "1. Send a single JSON object with your actions in order.\n2. Actions execute sequentially, one primitive per tick, with a 24-tick turn limit.\n3. Any incoming hit interrupts the turn and discards the remaining plan.\n4. With a zombie on screen, do not commit to 24 ticks of mining.\n"
+    of pvQuestions: "How much can you plan? Send your actions in one JSON object. How do they run? In sequence, one primitive per tick, until the 24-tick limit and the next request. What if you are hit? The turn ends immediately and the rest is discarded. Should you mine for 24 ticks with a zombie visible? No.\n"
+    of pvReordered: "Any hit interrupts your turn and cancels its remaining actions; avoid 24-tick mining plans with a zombie on screen. Otherwise your ordered plan runs one primitive per tick, for at most 24 ticks before you are asked again. Send your actions in a single JSON object.\n"
+    of pvHeldoutBriefing: "Plan a bounded sequence: a single JSON object holds your actions in order. Execution proceeds in order at one primitive per tick, stopping for a new request after at most 24 ticks. Damage cuts the turn short and throws away unfinished work. A visible zombie makes a 24-tick mining commitment unwise.\n"
+    of pvHeldoutReference: "Submission: one JSON object, actions in execution order. Execution: ordered primitives, one per tick, no more than 24 ticks per turn. Interruption: any hit ends the turn and drops the remainder. Planning hint: avoid mining for all 24 ticks while a zombie is visible.\n"
     of pvMixed: raise newException(ValueError, "mixed selection must resolve to a training wording")
   let scoring = case selection.selectedVariant
     of pvCanonical: CanonicalScoring

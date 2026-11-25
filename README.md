@@ -56,7 +56,7 @@ Exactly Crafter's seventeen, by name, and nothing else is a primitive:
 `make_wood_pickaxe`, `make_stone_pickaxe`, `make_iron_pickaxe`,
 `make_wood_sword`, `make_stone_sword`, `make_iron_sword`.
 
-A policy sends up to **12 actions per turn**, which the driver expands into at
+A policy sends an ordered action plan each turn, which the driver expands into at
 most **24 primitives** — one per tick — plus two macros (`goto`, `move`) and an
 `n` multiplier on `do` and `sleep`. **Any hit ends the turn early** and throws
 away the rest of the plan, which is what keeps batching from removing

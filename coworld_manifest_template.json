@@ -293,13 +293,6 @@
           "maximum": 22,
           "default": 8
         },
-        "maxActionsPerTurn": {
-          "type": "integer",
-          "description": "Reply entries honoured per turn.",
-          "minimum": 1,
-          "maximum": 64,
-          "default": 12
-        },
         "macroPrimitiveCap": {
           "type": "integer",
           "description": "Primitives one macro may expand to.",
@@ -677,7 +670,6 @@
         "regenTicks": 25,
         "starveTicks": 10,
         "plantRipenTicks": 120,
-        "maxActionsPerTurn": 12,
         "macroPrimitiveCap": 24,
         "dayLength": 192,
         "dayFraction": 128,
@@ -718,7 +710,6 @@
         "regenTicks": 25,
         "starveTicks": 10,
         "plantRipenTicks": 120,
-        "maxActionsPerTurn": 12,
         "macroPrimitiveCap": 24,
         "dayLength": 160,
         "dayFraction": 80,
@@ -762,7 +753,6 @@
       "regenTicks": 25,
       "starveTicks": 10,
       "plantRipenTicks": 120,
-      "maxActionsPerTurn": 12,
       "macroPrimitiveCap": 24,
       "dayLength": 192,
       "dayFraction": 128,

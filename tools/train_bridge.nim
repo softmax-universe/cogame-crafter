@@ -92,7 +92,7 @@ proc currentDecision(): JsonNode =
     result["semantic_view"]["prompt_template"] = selection.promptMetadata(
       result["messages"][0]["content"].getStr(), result["messages"][1]["content"].getStr())
     result["action_schema"] = %*{"type": "object", "required": ["actions"],
-      "properties": {"actions": {"type": "array", "maxItems": game.config.maxActionsPerTurn,
+      "properties": {"actions": {"type": "array",
         "items": {"type": "object", "required": ["act"], "properties": {
           "act": {"type": "string"}, "x": {"type": "integer"}, "y": {"type": "integer"},
           "dir": {"type": "string"}, "n": {"type": "integer"}}}},
@@ -151,7 +151,7 @@ proc step(command: JsonNode): JsonNode =
       if choice notin 0 ..< ChoiceCount or candidates(view)[choice].kind == JNull:
         raise newException(DirectiveError, "invalid choice: " & $choice)
       plan = planFor(choice, view)
-    directive = parseDirective(plan, game.config.maxActionsPerTurn)
+    directive = parseDirective(plan)
   except DirectiveError as error:
     return %*{"kind": "rejected", "reason": error.msg}
   discard game.applyDirective(directive, game.observationJson(includeNotes = false))

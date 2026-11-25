@@ -1,14 +1,4 @@
-## The decision layer: the per-turn loop that asks the seat what its cog does
-## next, and ALWAYS has an answer.
-##
-## Cadence: one turn every <= `turnTicks` (24) ticks, at most 56 turns per
-## episode. There is exactly ONE seat, so the starter's
-## one-parallel-batch-per-turn machinery (`curly.makeRequests`) carries a
-## batch of one and is otherwise untouched. THE PER-TURN LLM CALL BUDGET IS
-## EXACTLY ONE REQUEST, PLUS AT MOST ONE RETRY — at most 112 provider calls
-## per episode, and never more than one in flight.
-##
-## Each turn makes one model request with its remaining time budget.
+## Request one model plan per turn and preserve the actual response.
 
 import
   std/[json, monotimes, options, os, strutils, times],
@@ -225,7 +215,7 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
       let text = engine.client.textOf(
         responses[0].response, responses[0].error, batch[0].url)
       var directive = parseDirective(
-        extractJsonObject(text), sim.config.maxActionsPerTurn)
+        extractJsonObject(text))
       directive.source = dsLlm
       directive.latencyMs = latency
       if not engine.trajectory.isNil:
@@ -284,9 +274,7 @@ proc applyDirective*(sim: var SimServer, directive: Directive,
   let expansion = expandPlan(sim.knownMap, sim.cog.x, sim.cog.y,
     directive.actions, sim.config.macroPrimitiveCap, sim.config.turnTicks,
     sim.hostileCells())
-  ## An entry that fails validation is counted ONCE, in `repliesRepaired`;
-  ## `actionsDropped` counts the entries past `maxActionsPerTurn` and nothing
-  ## else (design note §Turn structure 6a/6b). The same number rides the
+
   ## `directive` record's `dropped` slot, which is what playback feeds back
   ## into `installPlan`, so the two counters agree live and in replay.
   sim.repliesRepaired += directive.dropped

@@ -34,7 +34,6 @@ type
     starveTicks*: int
     plantRipenTicks*: int
     parAchievements*: int
-    maxActionsPerTurn*: int
     macroPrimitiveCap*: int
 
     turnBudgetMs*: int
@@ -77,7 +76,6 @@ proc defaultGameConfig*(): GameConfig =
     starveTicks: 10,
     plantRipenTicks: 120,
     parAchievements: 8,
-    maxActionsPerTurn: 12,
     macroPrimitiveCap: 24,
     turnBudgetMs: 9500,
     turnSpacingMs: 2600,
@@ -155,7 +153,6 @@ proc validate*(config: GameConfig) =
                         ("regenTicks", config.regenTicks),
                         ("starveTicks", config.starveTicks),
                         ("plantRipenTicks", config.plantRipenTicks),
-                        ("maxActionsPerTurn", config.maxActionsPerTurn),
                         ("macroPrimitiveCap", config.macroPrimitiveCap)]:
     if value <= 0:
       raise newException(ConfigError, name & " must be positive; got " & $value)
@@ -206,7 +203,6 @@ proc update*(config: var GameConfig, configJson: string) =
   node.readInt("starveTicks", config.starveTicks)
   node.readInt("plantRipenTicks", config.plantRipenTicks)
   node.readInt("parAchievements", config.parAchievements)
-  node.readInt("maxActionsPerTurn", config.maxActionsPerTurn)
   node.readInt("macroPrimitiveCap", config.macroPrimitiveCap)
   node.readInt("turnBudgetMs", config.turnBudgetMs)
   node.readInt("turnSpacingMs", config.turnSpacingMs)
@@ -284,7 +280,6 @@ proc resolvedJson*(config: GameConfig): string =
     "starveTicks": config.starveTicks,
     "plantRipenTicks": config.plantRipenTicks,
     "parAchievements": config.parAchievements,
-    "maxActionsPerTurn": config.maxActionsPerTurn,
     "macroPrimitiveCap": config.macroPrimitiveCap,
     "turnBudgetMs": config.turnBudgetMs,
     "turnSpacingMs": config.turnSpacingMs,

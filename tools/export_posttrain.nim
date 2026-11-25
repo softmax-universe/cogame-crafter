@@ -66,7 +66,7 @@ when isMainModule:
           "say": directive.say,
           "notes": directive.notes
         }
-        let parsed = parseDirective(completion, config.maxActionsPerTurn)
+        let parsed = parseDirective(completion)
         let accepted = %*{"actions": parsed.actions.actionsJson(),
           "say": parsed.say, "notes": parsed.notes}
         let system = systemPrompt(wording)

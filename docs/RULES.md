@@ -77,10 +77,11 @@ times — which is exactly why `wake_up`, `eat_cow`, `eat_plant` and
 
 ## The turn, and the tick
 
-Per **command turn**: the observation is built, one LLM request is issued
-(attempt-1 deadline 6 s), retried **once** (3 s), and on a second failure the
-episode terminates unscored with `fault` rather than substituting a scripted
-move (model parse/action defects also emit `COGAME_PLAYER_FAILURE_URI`). The
+Per **command turn**: the observation is built, one LLM request is issued, and
+on failure the episode terminates unscored with `fault` rather than substituting
+a scripted move — emitting `COGAME_PLAYER_FAILURE_URI` with `kind: "player_error"`
+for invalid/unparseable replies and `kind: "episode_inconclusive"` for
+provider/infrastructure interruptions. The
 reply's actions are strictly validated (never rewritten or silently repaired),
 the macros are expanded against the known map **as of turn start**, and the
 queue is truncated to 24 primitives. Nothing carries over.

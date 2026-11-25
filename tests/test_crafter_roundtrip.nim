@@ -3,11 +3,12 @@
 ##   1. Native LLM player (regular JSON + markdown code fence) completes and
 ##      writes authoritative results.json + completed trajectory.
 ##   2. Invalid/ambiguous LLM reply fails cleanly: non-zero server exit, NO
-##      results.json, closed-schema player_failure.json, unscored failed
-##      trajectory with rejected attempts.
-##   3. Provider/infra failure (HTTP 500) fails cleanly: non-zero server exit,
-##      NO results.json, NO player_failure.json (not blamed on the player),
-##      unscored failed trajectory with provider_error stopDetail.
+##      results.json, closed-schema player_failure.json (kind=player_error),
+##      unscored failed trajectory with rejected attempts.
+##   3. Provider/infra failure (HTTP 503) fails cleanly: non-zero server exit,
+##      NO results.json, closed-schema player_failure.json
+##      (kind=episode_inconclusive), unscored failed trajectory with
+##      provider_error stopDetail.
 ##   4. Explicit offline scripted baseline (forager) completes offline with no
 ##      credentials and writes authoritative results.json.
 
@@ -159,7 +160,9 @@ suite "public host+player round-trip":
     check fileExists(dir / "player_failure.json")
     check fileExists(dir / "trajectory.jsonl")
     let failure = parseJson(readFile(dir / "player_failure.json"))
+    check failure.len == 3
     check failure["failed_policy_index"].getInt() == 0
+    check failure["kind"].getStr() == "player_error"
     check "parse_error" in failure["message"].getStr()
     let trajLines = readFile(dir / "trajectory.jsonl").strip().splitLines()
     check trajLines.len == 2
@@ -174,13 +177,19 @@ suite "public host+player round-trip":
     check not terminal["outcome"].hasKey("winner")
     check terminal["participant_outcomes"] == newJObject()
 
-  test "provider failure terminates unscored without blaming player or writing numeric results":
-    let dir = tmp / "provider_error"
-    let codes = runRoundTrip(serverBin, playerBin, dir, "provider_error", llmEnv, "provider_error")
+  test "provider 503 failure terminates unscored with episode_inconclusive player_failure.json":
+    let dir = tmp / "provider_503"
+    let codes = runRoundTrip(serverBin, playerBin, dir, "provider_503", llmEnv, "provider_503")
     check codes.serverCode != 0
     check not fileExists(dir / "results.json")
-    check not fileExists(dir / "player_failure.json")
+    check fileExists(dir / "player_failure.json")
     check fileExists(dir / "trajectory.jsonl")
+    let failure = parseJson(readFile(dir / "player_failure.json"))
+    check failure.len == 3
+    check failure["failed_policy_index"].getInt() == 0
+    check failure["kind"].getStr() == "episode_inconclusive"
+    check "provider_error" in failure["message"].getStr()
+    check "503" in failure["message"].getStr()
     let trajLines = readFile(dir / "trajectory.jsonl").strip().splitLines()
     check trajLines.len == 2
     let dec = parseJson(trajLines[0])

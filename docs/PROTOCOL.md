@@ -9,7 +9,7 @@ The Coworld contract, unchanged in shape from the starter.
 | `COGAME_CONFIG_URI` | in | the resolved `game_config` JSON |
 | `COGAME_RESULTS_URI` | out | the results document (closed schema — see below) |
 | `COGAME_SAVE_REPLAY_URI` | out | the binary `COWLDCRF` replay |
-| `COGAME_PLAYER_FAILURE_URI` | out | exactly `{"message", "failed_policy_index"}` |
+| `COGAME_PLAYER_FAILURE_URI` | out | closed `{"message", "failed_policy_index", "kind"}` (`player_error` \| `episode_inconclusive`) |
 | `COGAME_EVENTS_URI` | out | the tier-2 JSON-lines analysis stream |
 | `COGAME_LOAD_REPLAY_URI` | in | local replay mode |
 | `HOST` / `PORT` (or `COGAME_HOST` / `COGAME_PORT`) | in | the listener |

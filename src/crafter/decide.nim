@@ -102,6 +102,7 @@ proc resultRecord*(sim: SimServer): string =
 type
   TurnDecision* = object
     ok*: bool
+    seat*: int
     directive*: Directive
     failureCause*: string
     failureDetail*: string
@@ -134,6 +135,7 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
     seat = 0
     budget = initDuration(milliseconds = max(1, sim.config.turnBudgetMs))
     turnStart = getMonoTime()
+  result.seat = seat
   engine.nativeAttempts.setLen(0)
   ## Throttle state is PER TURN: a 429 on turn k says nothing about turn k+1.
   engine.client.throttled = false

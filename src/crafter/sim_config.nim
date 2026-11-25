@@ -1,14 +1,3 @@
-## `GameConfig` lifecycle: the defaults, `config.update` (the resolved config
-## JSON a replay carries and re-derives from), and the validators the design's
-## deadlines are chosen to satisfy.
-##
-## Forked from `coworld-ctf/src/ctf/sim_config.nim`, keeping its validator set:
-## whole-second `attempt1Ms` / `retryMs` (curly hands the deadline to
-## CURLOPT_TIMEOUT, whose granularity is WHOLE SECONDS, so a config that is
-## not a whole number of seconds is not the deadline it claims to be),
-## `attempt1Ms + retryMs <= turnBudgetMs`, and a positive
-## `wallClockBudgetSeconds`.
-
 import std/[json, strutils]
 import sim_types
 
@@ -48,8 +37,6 @@ type
     maxActionsPerTurn*: int
     macroPrimitiveCap*: int
 
-    attempt1Ms*: int
-    retryMs*: int
     turnBudgetMs*: int
     turnSpacingMs*: int
     wallClockBudgetSeconds*: int
@@ -92,8 +79,6 @@ proc defaultGameConfig*(): GameConfig =
     parAchievements: 8,
     maxActionsPerTurn: 12,
     macroPrimitiveCap: 24,
-    attempt1Ms: 6000,
-    retryMs: 3000,
     turnBudgetMs: 9500,
     turnSpacingMs: 2600,
     wallClockBudgetSeconds: 660,
@@ -133,20 +118,6 @@ proc validate*(config: GameConfig) =
   ## The validators the shipped numbers are chosen to satisfy. Each is a
   ## scar: a sub-second deadline is not the deadline it claims to be, and an
   ## unbounded wall clock is an episode the platform silently discards.
-  if config.attempt1Ms <= 0 or config.attempt1Ms mod 1000 != 0:
-    raise newException(ConfigError,
-      "attempt1Ms must be a positive WHOLE number of seconds (curly hands " &
-      "the deadline to CURLOPT_TIMEOUT, whose granularity is seconds); got " &
-      $config.attempt1Ms)
-  if config.retryMs <= 0 or config.retryMs mod 1000 != 0:
-    raise newException(ConfigError,
-      "retryMs must be a positive WHOLE number of seconds; got " &
-      $config.retryMs)
-  if config.attempt1Ms + config.retryMs > config.turnBudgetMs:
-    raise newException(ConfigError,
-      "attempt1Ms + retryMs must fit inside turnBudgetMs; got " &
-      $config.attempt1Ms & " + " & $config.retryMs & " > " &
-      $config.turnBudgetMs)
   if config.wallClockBudgetSeconds <= 0:
     raise newException(ConfigError,
       "wallClockBudgetSeconds must be positive")
@@ -237,8 +208,6 @@ proc update*(config: var GameConfig, configJson: string) =
   node.readInt("parAchievements", config.parAchievements)
   node.readInt("maxActionsPerTurn", config.maxActionsPerTurn)
   node.readInt("macroPrimitiveCap", config.macroPrimitiveCap)
-  node.readInt("attempt1Ms", config.attempt1Ms)
-  node.readInt("retryMs", config.retryMs)
   node.readInt("turnBudgetMs", config.turnBudgetMs)
   node.readInt("turnSpacingMs", config.turnSpacingMs)
   node.readInt("wallClockBudgetSeconds", config.wallClockBudgetSeconds)
@@ -317,8 +286,6 @@ proc resolvedJson*(config: GameConfig): string =
     "parAchievements": config.parAchievements,
     "maxActionsPerTurn": config.maxActionsPerTurn,
     "macroPrimitiveCap": config.macroPrimitiveCap,
-    "attempt1Ms": config.attempt1Ms,
-    "retryMs": config.retryMs,
     "turnBudgetMs": config.turnBudgetMs,
     "turnSpacingMs": config.turnSpacingMs,
     "wallClockBudgetSeconds": config.wallClockBudgetSeconds,

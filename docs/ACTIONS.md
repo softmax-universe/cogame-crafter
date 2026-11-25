@@ -28,7 +28,7 @@ silent substitution or fallback moves).
 
 **Invalid replies are rejected, never rewritten or silently repaired.** Turning
 a malformed `goto` into a `move_down` or substituting a fallback move hides
-model defects, so invalid replies fail validation and trigger the retry/failure
+model defects, so invalid replies fail validation and trigger the failure
 path.
 
 Every string that lands in the replay — `say`, `notes`, the policy label,

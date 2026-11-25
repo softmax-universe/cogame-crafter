@@ -14,7 +14,7 @@ class Provider(BaseHTTPRequestHandler):
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         assert self.path == "/v1/messages"
         assert self.headers["X-Coworld-Player-Slot"] == "0"
-        assert request["messages"][-1] == {"role": "assistant", "content": "{"}
+        assert [m["role"] for m in request["messages"]] == ["user"]
         Provider.calls += 1
         if MODE == "provider_error":
             body = json.dumps(
@@ -31,29 +31,11 @@ class Provider(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         if MODE == "reject":
-            # Turn 1 attempt 1 fails with an invalid action; attempt 2 fails
-            # with ambiguous multiple objects, forcing a clean rejection.
-            if Provider.calls == 1:
-                text = '"actions":[{"act":"invalid-command"},{"act":"noop"}],"say":"","notes":""}'
-            else:
-                text = '"actions":[{"act":"noop"}]} {"actions":[{"act":"do"}]}'
+            text = '{"actions":[{"act":"invalid-command"}]}'
         else:
-            # Turn 1 attempt 1 fails; attempt 2 returns a canonical prefill
-            # continuation. Turn 2 returns a single markdown JSON code fence.
-            if Provider.calls == 1:
-                text = "unusable reply"
-            elif Provider.calls == 3:
-                text = (
-                    "```json\n"
-                    '{"actions":[{"act":"noop"}],"say":"",'
-                    '"notes":"PRIVATE_CAPTURE_SENTINEL"}\n'
-                    "```"
-                )
-            else:
-                text = (
-                    '"actions":[{"act":"noop"}],"say":"",'
-                    '"notes":"PRIVATE_CAPTURE_SENTINEL"}'
-                )
+            text = '{"actions":[{"act":"noop"}],"say":"","notes":"PRIVATE_CAPTURE_SENTINEL"}'
+            if Provider.calls == 2:
+                text = "```json\n" + text + "\n```"
         body = json.dumps(
             {
                 "model": "native-capture-fixture",

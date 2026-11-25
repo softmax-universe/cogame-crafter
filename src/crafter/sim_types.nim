@@ -76,7 +76,6 @@ const
     ## was being dropped on two records in three.
   MaxPromptRunes* = 4000        ## PLAYER_PROMPT transport cap.
   MaxStopDetailRunes* = 200     ## `results.stopDetail` cap, in RUNES.
-  MaxReplyBytes* = 4096         ## bytes read from the provider before parsing.
 
   MaxPlayers* = 1
     ## num_agents is fixed at 1 in every variant and in the cert fixture.

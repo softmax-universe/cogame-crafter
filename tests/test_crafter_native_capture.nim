@@ -83,9 +83,8 @@ proc run(variant: string, destination: string, mode = "complete"): string =
       doAssert rejected["action_status"].getStr() == "rejected"
       doAssert rejected["selected_attempt_id"].kind == JNull
       doAssert rejected["executed_action"].kind == JNull
-      doAssert rejected["attempts"].len == 2
+      doAssert rejected["attempts"].len == 1
       doAssert not rejected["attempts"][0]["accepted"].getBool()
-      doAssert not rejected["attempts"][1]["accepted"].getBool()
       let terminal = parseJson(lines[^1])
       doAssert terminal["status"].getStr() == "failed"
       doAssert not terminal["outcome"].hasKey("scores")
@@ -97,22 +96,19 @@ proc run(variant: string, destination: string, mode = "complete"): string =
       return
     doAssert lines.len > 3
     let first = parseJson(lines[0])
-    doAssert first["attempts"].len == 2
-    doAssert not first["attempts"][0]["accepted"].getBool()
-    doAssert first["attempts"][1]["accepted"].getBool()
-    let accepted = first["attempts"][1]
-    doAssert accepted["prompt"][^1] == %*{"role": "assistant", "content": "{"}
+    doAssert first["attempts"].len == 1
+    let accepted = first["attempts"][0]
+    doAssert accepted["accepted"].getBool()
+    doAssert accepted["prompt"][^1]["role"].getStr() == "user"
     doAssert accepted["request"]["messages"][^1] == accepted["prompt"][^1]
-    doAssert not accepted["response"].getStr().startsWith("{")
+    doAssert accepted["response"].getStr().startsWith("{")
     doAssert parseJson(accepted["raw_response"].getStr())["content"][0]["text"] == accepted["response"]
     doAssert accepted["platform_call_id"].getStr().len == 36
     doAssert accepted["behavior_logprobs"].kind == JNull
     let promptAttempts = first["observation"]["prompt_attempts"]
-    doAssert promptAttempts.len == 2
-    doAssert promptAttempts[1]["attempt_id"] == accepted["attempt_id"]
-    doAssert promptAttempts[0]["prompt_template"]["user_sha256"] !=
-      promptAttempts[1]["prompt_template"]["user_sha256"]
-    doAssert promptAttempts[1]["prompt_template"] == selection.promptMetadata(
+    doAssert promptAttempts.len == 1
+    doAssert promptAttempts[0]["attempt_id"] == accepted["attempt_id"]
+    doAssert promptAttempts[0]["prompt_template"] == selection.promptMetadata(
       accepted["request"]["system"].getStr(),
       accepted["request"]["messages"][0]["content"].getStr())
     let fencedTurn = parseJson(lines[1])
@@ -137,4 +133,4 @@ for variant in ["standard", "longnight"]:
   let providerCaptured = run(variant, output / (variant & "-provider.jsonl"), "provider_error")
   let providerOrdinary = run(variant, "", "provider_error")
   doAssert providerCaptured == providerOrdinary, "capture changed provider-error native game outcomes"
-echo "complete native episodes: exact prefill/retries/fences/rejections/provider-errors/private capture and outcome parity passed"
+echo "complete native episodes: complete plain/fenced replies/rejections/provider-errors/private capture and outcome parity passed"

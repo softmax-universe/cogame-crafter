@@ -18,9 +18,6 @@ import
 
 const
   AnthropicUrl = "https://api.anthropic.com/v1/messages"
-  ReplyPrefill* = "{"
-    ## The assistant-turn prefill. Re-prefixed before parsing, and guarded
-    ## against a provider that echoes it.
   AnthropicVersion = "2023-06-01"
   BedrockAnthropicVersion = "bedrock-2023-05-31"
   DefaultBedrockModel* = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
@@ -114,17 +111,10 @@ proc requestFor*(
   client: LlmClient, system, user: string, slot: int
 ): tuple[url: string, headers: HttpHeaders, body: string] =
   ## One Messages-API request, shaped for whichever transport is live.
-  ## THE ASSISTANT-TURN PREFILL OF `{`. Both Anthropic Messages and Bedrock
-  ## invoke accept a trailing assistant turn, and it is what stops a model
-  ## from spending the whole token budget on preamble before the JSON (the
-  ## procgen 0.1.2 "cut off at max_tokens" scar — the fix is the prefill,
-  ## never a bigger cap). `textOf` re-prefixes it before parsing and guards a
-  ## provider that echoes it back.
   var body = %*{
     "max_tokens": client.maxOutputTokens,
     "system": system,
-    "messages": [{"role": "user", "content": user},
-                 {"role": "assistant", "content": ReplyPrefill}]
+    "messages": [{"role": "user", "content": user}]
   }
   var headers: HttpHeaders
   if client.transport == ltSidecar and slot >= 0:
@@ -176,25 +166,12 @@ proc textOf*(
   if response.code < 200 or response.code >= 300:
     raise newException(LlmError, "anthropic error " & $response.code & ": " &
       response.body.truncateRunes(MaxFallbackDetailRunes))
-  ## Cap the read at MaxReplyBytes before parsing: a provider body is
-  ## arbitrary bytes and the reply schema bounds what may be read.
-  let payload = parseJson(
-    if response.body.len > 4 * MaxReplyBytes:
-      response.body[0 ..< 4 * MaxReplyBytes]
-    else:
-      response.body)
+  let payload = parseJson(response.body)
   if payload{"stop_reason"}.getStr() == "refusal":
     raise newException(LlmError, "anthropic refusal")
   for contentBlock in payload["content"]:
     if contentBlock{"type"}.getStr() == "text":
       result.add(contentBlock{"text"}.getStr())
-  ## Re-prefix the prefill, unless the provider echoed it back or returned a
-  ## Markdown code fence.
-  let trimmed = result.strip()
-  if not trimmed.startsWith(ReplyPrefill) and not trimmed.startsWith("```"):
-    result = ReplyPrefill & result
-  if result.len > MaxReplyBytes:
-    result = result.truncateRunes(MaxReplyBytes)
   if payload{"stop_reason"}.getStr() == "max_tokens" and '{' notin result:
     raise newException(LlmError, "reply cut off at max_tokens before any " &
       "JSON: " & result.truncateRunes(160).replace("\n", " "))

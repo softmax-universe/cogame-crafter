@@ -307,20 +307,6 @@
           "maximum": 64,
           "default": 24
         },
-        "attempt1Ms": {
-          "type": "integer",
-          "description": "Attempt-1 LLM deadline, a whole number of seconds.",
-          "minimum": 1000,
-          "maximum": 60000,
-          "default": 6000
-        },
-        "retryMs": {
-          "type": "integer",
-          "description": "The single retry's deadline, a whole number of seconds.",
-          "minimum": 1000,
-          "maximum": 60000,
-          "default": 3000
-        },
         "turnBudgetMs": {
           "type": "integer",
           "description": "Monotonic deadline around the whole turn.",
@@ -699,8 +685,6 @@
         "maxCows": 12,
         "maxZombies": 8,
         "parAchievements": 8,
-        "attempt1Ms": 6000,
-        "retryMs": 3000,
         "turnBudgetMs": 9500,
         "turnSpacingMs": 2600,
         "wallClockBudgetSeconds": 660,
@@ -742,8 +726,6 @@
         "maxCows": 8,
         "maxZombies": 12,
         "parAchievements": 6,
-        "attempt1Ms": 6000,
-        "retryMs": 3000,
         "turnBudgetMs": 9500,
         "turnSpacingMs": 2600,
         "wallClockBudgetSeconds": 660,

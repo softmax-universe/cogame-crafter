@@ -10,7 +10,7 @@ than fabricating provenance. The completed private artifact is sealed before
 results trigger player teardown; public replays keep their existing format.
 
 Every attempted native Messages request retains the exact system, user and
-assistant-prefill messages, request body, received response, available platform
+player-visible messages, request body, received response, available platform
 call/serving identities, usage and sampling evidence. Unavailable tokens or
 likelihoods stay absent. The supplied assistant `{` is prompt context: the
 received generated suffix is preserved exactly, without prepending that brace
@@ -31,7 +31,7 @@ nim r --path:src tests/test_crafter_native_capture.nim
 
 This runs complete native simulator episodes through a loopback Messages
 provider for both variants, comparing capture on/off outcomes and checking
-prefills, rejected retries, fallbacks and private/public separation. It removes
+plain and fenced replies, rejected actions, provider failures and private/public separation. It removes
 wall pacing for bounded deterministic CPU checks. Its fixture replies are not
 real-model training data. Production hosted capture, authenticated receipt
 admission, checkpoint serving and exact training/serving continuation parity

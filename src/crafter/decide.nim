@@ -8,13 +8,7 @@
 ## EXACTLY ONE REQUEST, PLUS AT MOST ONE RETRY — at most 112 provider calls
 ## per episode, and never more than one in flight.
 ##
-## DEGRADE, NEVER HANG. Every wait here is bounded: attempt 1 gets
-## `attempt1Ms`, the single retry gets `retryMs`, and the whole turn is
-## wrapped in a monotonic `turnBudgetMs` deadline. A rolling 60 s request
-## counter skips the call outright when the sidecar's per-episode cap is in
-## reach. On a second failure the seat plays the `forager` scripted plan — the
-## SAME PROC the `forager` baseline uses, imported, never duplicated — and a
-## `fallback` record names the cause.
+## Each turn makes one model request with its remaining time budget.
 
 import
   std/[json, monotimes, options, os, strutils, times],
@@ -196,33 +190,21 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
   engine.batchStarted = true
 
   let observation = sim.observationJson(includeNotes = true)
-  var attempt = 0
   var open = true
   var lastCause = ""
   var lastDetail = ""
-  while open and attempt < 2:
+  block requestAction:
     if engine.client.disabled:
-      break
+      break requestAction
     let remainingMs = (budget - (getMonoTime() - turnStart)).inMilliseconds.int
     if remainingMs <= 0:
       lastCause = "timeout"
-      lastDetail = "per-turn budget exhausted before attempt " & $(attempt + 1)
-      result.records.add(fallbackRecord(turnIndex, attempt + 1, "timeout",
+      lastDetail = "per-turn budget exhausted before requesting an action"
+      result.records.add(fallbackRecord(turnIndex, 1, "timeout",
         lastDetail))
-      break
-    ## turnBudgetMs is a monotonic deadline around the WHOLE turn, the
-    ## turnSpacingMs rate floor included, so an attempt is given the SMALLER of
-    ## its configured deadline and the time the turn has left.
-    let deadlineMs = min(
-      (if attempt == 0: sim.config.attempt1Ms else: sim.config.retryMs),
-      remainingMs)
-    var user = $observation
-    if attempt > 0:
-      user.add("\n\nYour previous reply was rejected (" &
-        lastDetail.truncateRunes(120) &
-        "). Reply with ONLY one valid JSON object containing an \"actions\" array.")
+      break requestAction
     let request = engine.client.requestFor(
-      systemPrompt(engine.selection), userMessage(engine.seats[seat].prompt, user), seat)
+      systemPrompt(engine.selection), userMessage(engine.seats[seat].prompt, $observation), seat)
     ## ONE seat, so this is a batch of ONE through the starter's unchanged
     ## batching path. Never a sequential per-cog loop.
     var batch: RequestBatch
@@ -230,12 +212,12 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
     let started = getMonoTime()
     engine.noteRequest()
     let responses = engine.client.curl.makeRequests(
-      batch, max(1, deadlineMs div 1000))
+      batch, max(1, remainingMs div 1000))
     let latency = (getMonoTime() - started).inMilliseconds.int
     var evidence: DecisionAttempt
     if not engine.trajectory.isNil:
       evidence = nativeAttempt(engine.seats[seat].label, turnIndex,
-        attempt, request.body)
+        0, request.body)
     try:
       if not engine.trajectory.isNil:
         evidence.receiveNativeResponse(responses[0].response,
@@ -258,12 +240,7 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
       lastCause = "parse_error"
       lastDetail = error.msg
       result.records.add(
-        fallbackRecord(turnIndex, attempt + 1, lastCause, error.msg))
-      if attempt == 0:
-        echo "crafter llm: seat ", seat, " attempt 1 failed, will retry: ",
-          error.msg
-      else:
-        echo "crafter llm: seat ", seat, " attempt 2 failed: ", error.msg
+        fallbackRecord(turnIndex, 1, lastCause, error.msg))
     except CatchableError as error:
       if not engine.trajectory.isNil:
         evidence.rejectionReason = some(error.msg)
@@ -280,18 +257,9 @@ proc turn*(engine: var DecisionEngine, sim: var SimServer, turnIndex,
       lastCause = cause
       lastDetail = error.msg
       result.records.add(
-        fallbackRecord(turnIndex, attempt + 1, cause, error.msg))
-      if attempt == 0:
-        echo "crafter llm: seat ", seat, " attempt 1 failed, will retry: ",
-          error.msg
-      else:
-        echo "crafter llm: seat ", seat, " attempt 2 failed: ", error.msg
+        fallbackRecord(turnIndex, 1, cause, error.msg))
     if not engine.trajectory.isNil:
       engine.nativeAttempts.add(evidence)
-    inc attempt
-    if engine.client.throttled and open:
-      echo "crafter llm: provider throttled on turn ", turnIndex
-      break
 
   if open:
     result.ok = false
